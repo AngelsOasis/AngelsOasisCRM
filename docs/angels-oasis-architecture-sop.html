@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Angels Oasis | System Architecture & Operating SOP</title>
+  <style>
+    :root {
+      --plum: #4a1d3d;
+      --plum-deep: #28111f;
+      --mint: #54c7a0;
+      --mint-pale: #e8f6f0;
+      --ink: #20252b;
+      --muted: #647078;
+      --line: #d9e1df;
+      --paper: #fff;
+      --wash: #f3f6f5;
+      --warning: #8b4c16;
+      --warning-bg: #fff4e4;
+      --red: #9c3838;
+      --red-bg: #fff0ee;
+    }
+    @page { size: A4; margin: 17mm 17mm 18mm; @bottom-left { content: "ANGELS OASIS  /  INTERNAL SYSTEM SOP"; color: #78817f; font: 8pt Arial, sans-serif; } @bottom-right { content: "AO-IT-SOP-001  /  " counter(page); color: #78817f; font: 8pt Arial, sans-serif; } }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--paper); color: var(--ink); font: 10pt/1.48 Arial, Helvetica, sans-serif; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1, h2, h3 { color: var(--plum); }
+    h1 { font: 700 33pt/1.08 Georgia, 'Times New Roman', serif; letter-spacing: 0; margin: 0 0 13mm; }
+    h2 { font: 700 20pt/1.15 Georgia, 'Times New Roman', serif; margin: 0 0 5mm; }
+    h3 { font: 700 11pt/1.25 Arial, sans-serif; margin: 0 0 2mm; }
+    p { margin-bottom: 3mm; }
+    ul, ol { margin: 2mm 0 4mm; padding-left: 6mm; }
+    li { padding-left: 1mm; margin: 0 0 1.5mm; }
+    .page { position: relative; min-height: 259mm; page-break-after: always; break-after: page; }
+    .page:last-child { page-break-after: auto; break-after: auto; }
+    .eyebrow { color: var(--mint); font-size: 9pt; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; }
+    .cover { min-height: 259mm; display: flex; flex-direction: column; justify-content: space-between; padding: 8mm 0 6mm; }
+    .brand { display: flex; align-items: center; gap: 4mm; color: var(--plum); font-weight: 700; letter-spacing: .4px; }
+    .brand-mark { width: 12mm; height: 12mm; border-radius: 3mm; display: grid; place-items: center; background: var(--plum); color: white; font: 700 16pt Georgia, serif; }
+    .cover-main { margin-top: 23mm; }
+    .cover h1 { max-width: 150mm; margin-top: 9mm; }
+    .subtitle { max-width: 125mm; color: var(--muted); font: 15pt/1.45 Georgia, serif; }
+    .cover-band { margin-top: 17mm; padding: 5mm 6mm; border-left: 2mm solid var(--mint); background: var(--wash); color: var(--plum-deep); }
+    .cover-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; width: 100%; margin-top: 9mm; }
+    .cover-grid div { padding-top: 3mm; border-top: .4mm solid var(--line); }
+    .label { color: var(--muted); display: block; font-size: 8pt; text-transform: uppercase; letter-spacing: .7px; margin-bottom: 1mm; }
+    .value { color: var(--ink); font-weight: 700; }
+    .section-kicker { color: var(--mint); font-size: 8pt; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; margin-bottom: 2mm; }
+    .lead { color: var(--muted); font: 12pt/1.45 Georgia, serif; max-width: 165mm; margin-bottom: 7mm; }
+    .rule { height: 1px; border: 0; background: var(--line); margin: 5mm 0; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3mm; }
+    .panel { border: .35mm solid var(--line); background: white; padding: 4mm; break-inside: avoid; }
+    .panel.tint { background: var(--wash); }
+    .panel.plum { background: var(--plum-deep); color: white; border-color: var(--plum-deep); }
+    .panel.plum h3 { color: white; }
+    .panel.plum p, .panel.plum li { color: #e8e0e5; }
+    .callout { border-left: 1.3mm solid var(--warning); background: var(--warning-bg); padding: 4mm 5mm; margin: 4mm 0; break-inside: avoid; }
+    .callout.critical { border-color: var(--red); background: var(--red-bg); }
+    .callout strong { color: var(--plum-deep); }
+    .small { color: var(--muted); font-size: 8.5pt; }
+    .tag { display: inline-block; border-radius: 1mm; padding: 1mm 2mm; background: var(--mint-pale); color: #195d49; font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+    table { border-collapse: collapse; width: 100%; margin: 3mm 0 5mm; font-size: 8.7pt; }
+    th { text-align: left; background: var(--plum); color: white; padding: 2.4mm 2.5mm; font-size: 8pt; }
+    td { vertical-align: top; padding: 2.4mm 2.5mm; border-bottom: .3mm solid var(--line); }
+    tr { break-inside: avoid; }
+    .step { display: grid; grid-template-columns: 9mm 1fr; gap: 3mm; margin: 0 0 4mm; break-inside: avoid; }
+    .step-no { width: 8mm; height: 8mm; border-radius: 50%; background: var(--plum); color: white; display: grid; place-items: center; font-weight: 700; }
+    .step p { margin: 0; }
+    .flow { display: grid; grid-template-columns: repeat(5, 1fr); align-items: stretch; gap: 4mm; margin: 5mm 0; }
+    .flow-node { position: relative; padding: 3mm; border: .4mm solid var(--line); background: var(--wash); min-height: 27mm; }
+    .flow-node:not(:last-child)::after { content: ""; position: absolute; right: -4mm; top: 50%; width: 4mm; height: .5mm; background: var(--mint); }
+    .flow-node strong { display: block; color: var(--plum); font-size: 8.5pt; margin-bottom: 1mm; }
+    .flow-node span { display: block; color: var(--muted); font-size: 7.5pt; line-height: 1.35; }
+    .arch { display: grid; grid-template-columns: 1fr 13mm 1fr; gap: 3mm; align-items: center; margin: 4mm 0; }
+    .arch-arrow { text-align: center; color: var(--mint); font-size: 20pt; font-weight: 700; }
+    .arch-stack { display: grid; gap: 2.5mm; }
+    .arch-box { padding: 3mm; border: .4mm solid var(--line); background: var(--wash); }
+    .arch-box strong { color: var(--plum); }
+    .arch-box small { color: var(--muted); display: block; }
+    .checklist { list-style: none; padding-left: 0; }
+    .checklist li { padding-left: 6mm; position: relative; margin-bottom: 2mm; }
+    .checklist li::before { content: ""; position: absolute; left: 0; top: .6mm; width: 3.2mm; height: 3.2mm; border: .4mm solid var(--plum); background: white; }
+    .two-col { columns: 2; column-gap: 8mm; }
+    .two-col li { break-inside: avoid; }
+    .source { overflow-wrap: anywhere; font: 8pt/1.4 'Courier New', monospace; color: var(--plum); }
+    .endmark { margin-top: 8mm; padding-top: 3mm; border-top: .5mm solid var(--mint); color: var(--muted); font-size: 8pt; }
+    @media screen {
+      body { background: #e8edeb; padding: 12mm; }
+      .page { width: 210mm; min-height: 297mm; margin: 0 auto 10mm; padding: 17mm; background: white; box-shadow: 0 2mm 9mm #24342c22; }
+      .cover { min-height: 259mm; }
+    }
+  </style>
+</head>
+<body>
+  <section class="page cover">
+    <div>
+      <div class="brand"><span class="brand-mark">A</span><span>ANGELS OASIS <span style="color:#82908a;font-weight:400">/ SYSTEM OPERATIONS</span></span></div>
+      <div class="cover-main">
+        <div class="eyebrow">Architecture + Standard Operating Procedure</div>
+        <h1>Referral Outreach<br>CRM</h1>
+        <p class="subtitle">System architecture, staff workflow, campaign review controls, and operational readiness.</p>
+        <div class="cover-band"><strong>Operational principle</strong><br>People manage referral relationships. AI may prepare draft content. A designated human reviews every campaign before any send action.</div>
+      </div>
+    </div>
+    <div>
+      <div class="cover-grid">
+        <div><span class="label">Document ID</span><span class="value">AO-IT-SOP-001</span></div>
+        <div><span class="label">Version / status</span><span class="value">1.0 / Technical validation required</span></div>
+        <div><span class="label">Prepared from</span><span class="value">Repository snapshot, 29 Sep 2026</span></div>
+        <div><span class="label">Document owner</span><span class="value">Angels Oasis system administrator</span></div>
+      </div>
+      <p class="small" style="margin-top:6mm">INTERNAL USE ONLY · This document describes the code and configuration visible in the reviewed workspace. Validate the readiness gates before enabling live outreach.</p>
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">01 / Document control</div>
+    <h2>Purpose & control</h2>
+    <p class="lead">This SOP standardizes how authorized staff use the Angels Oasis Referral Outreach CRM to maintain referral-partner records, discover facilities, prepare campaign content, review drafts, and monitor outcomes.</p>
+    <table>
+      <thead><tr><th>Control</th><th>Definition</th><th>Owner</th></tr></thead>
+      <tbody>
+        <tr><td>Purpose</td><td>Consistent, auditable handling of referral contacts and outbound campaign drafts.</td><td>Operations lead</td></tr>
+        <tr><td>Scope</td><td>Internal web application, Supabase Auth and database, map discovery, AI draft generation, campaign review, email delivery integration, and analytics.</td><td>System administrator</td></tr>
+        <tr><td>Audience</td><td>Authorized staff, campaign approvers, and administrators.</td><td>Department leads</td></tr>
+        <tr><td>Review cycle</td><td>At release changes and at least annually; revalidate integrations after any migration or provider change.</td><td>System administrator</td></tr>
+        <tr><td>Approval</td><td>Operational owner and privacy/security reviewer approval must be recorded before production use.</td><td>Pending sign-off</td></tr>
+      </tbody>
+    </table>
+    <div class="callout critical"><strong>Current status: validation required.</strong> The reviewed workspace contains one database migration (0001), while routed screens expect additional schema fields and Edge Functions that are not present in this snapshot. Treat test-send/live-send and admin key management as unavailable until the readiness checklist on page 7 is closed.</div>
+    <h3>Contents</h3>
+    <div class="grid-2">
+      <div class="panel tint"><strong>02 · System architecture</strong><br><span class="small">Components, trust boundaries, and workflow overview</span></div>
+      <div class="panel tint"><strong>03 · Roles & safeguards</strong><br><span class="small">Permissions, data handling, and approval controls</span></div>
+      <div class="panel tint"><strong>04 · Operating procedures</strong><br><span class="small">Daily lead, discovery, drafting, and review sequence</span></div>
+      <div class="panel tint"><strong>05 · Exceptions & support</strong><br><span class="small">Failure handling and operational evidence</span></div>
+      <div class="panel tint"><strong>06 · Technical operations</strong><br><span class="small">Deployment, secrets, backup, and release discipline</span></div>
+      <div class="panel tint"><strong>07 · Production readiness</strong><br><span class="small">Known gaps and go-live acceptance checks</span></div>
+    </div>
+    <hr class="rule">
+    <p class="small"><strong>Document limitation:</strong> This is an operations guide derived from source files, not a compliance determination, security audit, or confirmation that external services are deployed and functioning.</p>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">02 / System architecture</div>
+    <h2>How the system fits together</h2>
+    <p class="lead">The frontend is a React single-page application. Supabase is the shared platform for identity, PostgreSQL data, row-level security, and server-side functions. External providers are called only for their specific workflow.</p>
+    <div class="arch">
+      <div class="arch-stack">
+        <div class="arch-box"><strong>Staff browser</strong><small>React + TypeScript · Vite · React Router</small></div>
+        <div class="arch-box"><strong>Authentication boundary</strong><small>Supabase Auth session gates /app routes</small></div>
+        <div class="arch-box"><strong>CRM screens</strong><small>Dashboard · Leads · Map · Campaigns · AI Writer · Analytics · Settings</small></div>
+      </div>
+      <div class="arch-arrow">⇄</div>
+      <div class="arch-stack">
+        <div class="arch-box"><strong>Supabase project</strong><small>Auth + PostgreSQL + Row Level Security</small></div>
+        <div class="arch-box"><strong>Core records</strong><small>profiles · facilities · leads · contacts · campaigns · content_drafts · emails · email_events</small></div>
+        <div class="arch-box"><strong>Edge Functions</strong><small>ai-writer exists in source; campaign-sender and integration-keys are referenced by UI but absent here</small></div>
+      </div>
+    </div>
+    <div class="grid-3">
+      <div class="panel"><h3>AI provider</h3><p class="small">The ai-writer function calls Deepseek server-side. Primary and fallback API keys are Supabase secrets. Drafts are stored in content_drafts and the campaign starts pending approval.</p></div>
+      <div class="panel"><h3>Facility discovery</h3><p class="small">The routed map uses Leaflet and references CDPH, OpenStreetMap Overpass, and optional Google Places providers. The discovery module is not included in this workspace snapshot.</p></div>
+      <div class="panel"><h3>Email delivery</h3><p class="small">Campaigns UI invokes campaign-sender for test/send. The function source is absent; actual delivery, suppression, event callbacks, and scheduler behavior must be verified before use.</p></div>
+    </div>
+    <h3 style="margin-top:6mm">Business workflow</h3>
+    <div class="flow">
+      <div class="flow-node"><strong>1 · Find</strong><span>Manual entry or map candidate discovery</span></div>
+      <div class="flow-node"><strong>2 · Qualify</strong><span>Check contact, category, location, status</span></div>
+      <div class="flow-node"><strong>3 · Draft</strong><span>AI Writer creates saved campaign draft</span></div>
+      <div class="flow-node"><strong>4 · Review</strong><span>Human edits, tests, approves or rejects</span></div>
+      <div class="flow-node"><strong>5 · Deliver</strong><span>Sender function, then record outcomes</span></div>
+    </div>
+    <div class="callout"><strong>Trust boundary:</strong> Browser configuration contains only the Supabase project URL and publishable key. Service-role, Deepseek, mail-provider, and other private keys belong in Supabase secrets or an approved server-side secret store, never in source code or browser environment variables.</div>
+    <p class="small">Primary implementation references: <span class="source">src/App.tsx · src/lib/auth.tsx · src/lib/supabaseClient.ts · src/pages/app/Leads.tsx · src/pages/app/Campaigns.tsx · src/pages/app/AIWriter.tsx · supabase/functions/ai-writer/index.ts · supabase/migrations/0001_init.sql</span></p>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">03 / Roles & safeguards</div>
+    <h2>People, permissions & data</h2>
+    <p class="lead">Access is account-based. The current SQL policies mostly authorize any authenticated user to read/write operational tables; role names exist, but role-specific enforcement is not consistently implemented in the reviewed migration.</p>
+    <table>
+      <thead><tr><th>Role / function</th><th>Expected responsibility</th><th>Control note</th></tr></thead>
+      <tbody>
+        <tr><td>Staff</td><td>Create/update referral-partner leads, maintain contact details and notes, review pipeline status.</td><td>Use only approved business-contact information.</td></tr>
+        <tr><td>Approver</td><td>Verify content, audience, sender identity, timing, and suppression; approve, request edits, or reject.</td><td>Approval should be independent of draft generation when staffing allows.</td></tr>
+        <tr><td>Administrator</td><td>Manage users and secrets, deploy schema/functions, verify backups and integrations.</td><td>Use least privilege; never share credentials.</td></tr>
+        <tr><td>Viewer</td><td>Read-only operational review.</td><td>Role requires enforced database policies; do not assume the label alone restricts access.</td></tr>
+      </tbody>
+    </table>
+    <div class="grid-2">
+      <div class="panel tint"><h3>Permitted records</h3><ul><li>Facility and referral organization details</li><li>Business contact name, role, work email, and phone</li><li>Outreach status, consent evidence, and non-sensitive operational notes</li></ul></div>
+      <div class="panel tint"><h3>Do not enter</h3><ul><li>Patient names, dates of birth, diagnoses, or other PHI</li><li>Medical records, referral packets, or case-specific clinical details</li><li>Passwords, API keys, or private tokens in lead notes or email drafts</li></ul></div>
+    </div>
+    <div class="callout critical"><strong>Privacy safeguard:</strong> This CRM schema is for partner and outreach records, not patient intake or clinical records. Never use it to transmit PHI. Route patient information through an approved clinical intake channel with appropriate access controls.</div>
+    <h3>Required human review before a send</h3>
+    <ul class="checklist">
+      <li>Confirm the approved campaign type, purpose, recipient audience, and send date.</li>
+      <li>Check that every claim about licensed services, staffing, availability, and locations is current and approved.</li>
+      <li>For testimonials, verify consent is documented and use only the exact approved source text.</li>
+      <li>Review recipient eligibility, correct work email, unsubscribed / do-not-contact status, and duplicate risk.</li>
+      <li>Confirm reply-to, physical mailing address, footer, unsubscribe mechanism, and test rendering.</li>
+      <li>Record approval and report any unexpected recipient count or delivery result before retrying.</li>
+    </ul>
+    <p class="small">Do not treat an authenticated session as proof of an individual's campaign-approval authority. Enforce role checks in Row Level Security and server-side functions.</p>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">04 / Standard operating procedure</div>
+    <h2>Daily workflow</h2>
+    <p class="lead">Complete the following sequence for routine referral-partner maintenance and campaign preparation. Skip any send-related action until the production readiness gates have been formally accepted.</p>
+    <h3>A. Sign in and confirm system state</h3>
+    <div class="step"><div class="step-no">1</div><p>Open the approved CRM URL and sign in using your assigned Supabase email/password account. If redirected to login, authenticate; do not share accounts.</p></div>
+    <div class="step"><div class="step-no">2</div><p>Review Dashboard totals and the Campaigns approval queue. If data fails to load or the site shows an integration/schema error, stop the affected task and report it to the administrator.</p></div>
+    <h3>B. Add or qualify a referral lead</h3>
+    <div class="step"><div class="step-no">3</div><p>Open <strong>Leads → Add Lead</strong>. Enter the facility name and the available business address, county, referral category, contact, department, work email, phone, and non-sensitive notes. Save with an accurate category and source.</p></div>
+    <div class="step"><div class="step-no">4</div><p>Set the pipeline state truthfully: New → Researched → Contacted → Engaged → Referral Received → Active Partner. Use Dormant only when appropriate. Use Do Not Contact when suppression is required; verify sender enforcement before any campaign.</p></div>
+    <div class="step"><div class="step-no">5</div><p>For discovery, open <strong>Hospitals Map</strong>, select the relevant Angels Oasis facility, choose a search source and radius, inspect a candidate, check for an existing lead, and add only a verified partner. Confirm category, address, and duplicate status in Leads.</p></div>
+    <h3>C. Prepare and review campaign content</h3>
+    <div class="step"><div class="step-no">6</div><p>Open <strong>AI Writer</strong>, choose Monday Newsletter, Wednesday Facility Education, or Friday Testimonials/Blog, add brief non-sensitive context, then select Generate Draft. The source function stores the draft and leaves the campaign at Pending Approval.</p></div>
+    <div class="step"><div class="step-no">7</div><p>Open <strong>Campaigns → Needs your review</strong>. Read the whole draft; correct factual or tone issues and check all facility claims. For testimonial content, use only a consented quote. Save edits; if changes are needed, keep the draft out of the approved state.</p></div>
+    <div class="step"><div class="step-no">8</div><p>When sender integration is verified, send a test to an internal mailbox. Check subject, rendering, links, mailing address, unsubscribe link, reply-to behavior, and recipient merge fields. Do not use live recipients for a test.</p></div>
+    <div class="step"><div class="step-no">9</div><p>A designated approver records the decision in Campaigns: Approve, Needs edit, or Reject. Approval authorizes the next controlled send step only after server-side checks are validated; it does not prove delivery occurred.</p></div>
+    <div class="step"><div class="step-no">10</div><p>After a verified send, check Campaigns history and Email Analytics. Reconcile sent, failed, and recipient counts. Update lead status based on actual relationship activity; log replies and suppression requests through approved mechanisms.</p></div>
+    <div class="callout"><strong>Current implementation boundary:</strong> AI generation exists in the included Edge Function source. The Campaigns page calls a <span class="source">campaign-sender</span> function that is not included in this workspace snapshot. Use the send steps above only after deployment, security, suppression, and delivery tests are documented.</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">05 / Exceptions & support</div>
+    <h2>When something goes wrong</h2>
+    <table>
+      <thead><tr><th>Condition</th><th>Immediate action</th><th>Escalation / evidence</th></tr></thead>
+      <tbody>
+        <tr><td>Cannot sign in</td><td>Verify URL and account email; retry once. Do not create a shared login.</td><td>Admin checks Supabase Auth user, project URL/key configuration, and Auth service health.</td></tr>
+        <tr><td>Lead save fails</td><td>Do not repeatedly submit. Capture the visible error and verify whether the record was created before retrying.</td><td>Admin checks network, required migrations, RLS policy, and duplicate constraints.</td></tr>
+        <tr><td>Map search unavailable</td><td>Refresh once or change provider; manually add a verified lead if policy permits.</td><td>Capture facility, radius, provider, time, and error. Check provider availability and credentials.</td></tr>
+        <tr><td>AI draft fails</td><td>Do not paste keys into the browser. Retry only after checking whether a campaign/draft was created.</td><td>Admin checks ai-writer deployment, Deepseek secrets, function logs, and database access.</td></tr>
+        <tr><td>Unexpected campaign status/count</td><td>Do not click Send now again. Pause further sends; preserve current records.</td><td>Admin inspects campaign/email rows and function logs; reconcile provider delivery before retry.</td></tr>
+        <tr><td>Opt-out or wrong-recipient report</td><td>Stop outreach to that contact and notify the system owner immediately.</td><td>Record time, address, campaign, and request. Ensure suppression is enforced server-side before reactivation.</td></tr>
+        <tr><td>Key exposure suspected</td><td>Do not forward or paste the key into chat/tickets. Ask admin to rotate/revoke immediately.</td><td>Review function/deployment logs and source history; document incident per organizational policy.</td></tr>
+      </tbody>
+    </table>
+    <h3>Incident record minimum</h3>
+    <div class="panel tint">
+      <p>Record the timestamp and time zone, affected workflow, user account (not password), campaign/lead ID if applicable, exact visible error, actions already attempted, whether any send may have occurred, and the administrator notified. Keep PHI and secret values out of the incident record.</p>
+    </div>
+    <h3 style="margin-top:6mm">Data correction and deletion</h3>
+    <ul>
+      <li>Correct inaccurate partner details promptly and preserve an audit trail where available.</li>
+      <li>Before deleting a lead, check linked contacts and email history implications; deletion may cascade in the database.</li>
+      <li>Never use browser local-storage reset controls from older UI components to manage production records.</li>
+      <li>Escalate a suppression request for centralized handling; a UI status alone is insufficient until sender enforcement is confirmed.</li>
+    </ul>
+    <div class="callout critical"><strong>Never improvise a retry:</strong> A timeout can happen after a provider accepted a message. Confirm provider and database status first to prevent duplicate outreach.</div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">06 / Technical operations</div>
+    <h2>Admin runbook</h2>
+    <h3>Environment and deployment</h3>
+    <ol>
+      <li>Keep frontend source in the approved repository and deploy a Vite production build to an approved static host.</li>
+      <li>Configure <span class="source">VITE_SUPABASE_URL</span> and <span class="source">VITE_SUPABASE_PUBLISHABLE_KEY</span> in local/deployment environment settings. Never commit <span class="source">.env.local</span>.</li>
+      <li>Apply reviewed database migrations to the intended Supabase project. Confirm migration history and schema before deploying frontend code that depends on new columns or tables.</li>
+      <li>Deploy Edge Functions independently and verify their authentication, authorization, CORS, input validation, idempotency, logging, and error behavior.</li>
+      <li>Store Deepseek, mail provider, Google Places, and service-role secrets in Supabase secrets/Vault as appropriate. Rotate credentials when staff or vendors change.</li>
+      <li>Use a non-production environment for test campaigns. Confirm database backups and a tested restore procedure before live data onboarding.</li>
+    </ol>
+    <h3>Security controls to verify</h3>
+    <div class="grid-2">
+      <div class="panel"><h3>Identity & access</h3><p class="small">Require named accounts, MFA where supported, immediate offboarding, least privilege, and database RLS policies aligned to staff/approver/admin roles.</p></div>
+      <div class="panel"><h3>Campaign sender</h3><p class="small">Server must independently verify approval, eligible audience, valid email, unsubscribed/do-not-contact suppression, send window, test/live mode, and duplicate-send/idempotency controls.</p></div>
+      <div class="panel"><h3>Secrets</h3><p class="small">Keep service-role and provider keys server-side. Mask key previews. Restrict secret changes to administrators; audit and rotate.</p></div>
+      <div class="panel"><h3>Observability</h3><p class="small">Record campaign ID, recipient counts, provider message IDs, failures, and event callbacks without logging secrets or unnecessary personal information.</p></div>
+    </div>
+    <h3 style="margin-top:6mm">Change and release control</h3>
+    <ul class="checklist">
+      <li>Review schema and function changes together with the frontend fields that consume them.</li>
+      <li>Run typecheck/build and a staging workflow: sign-in, lead create/update, AI draft, approval, test send, suppression test, failure/retry, and analytics.</li>
+      <li>Have a second person review security-impacting SQL policies, sender logic, and recipient selection.</li>
+      <li>Deploy migrations/functions before frontend code that requires them; retain a rollback or forward-fix plan.</li>
+      <li>After deployment, verify logs, a test campaign, a negative test for unapproved sending, and a negative test for opted-out recipients.</li>
+    </ul>
+    <p class="small">The README contains useful setup notes, but it describes an earlier implementation in places. Prefer the actual routed pages, current migration history, deployed Supabase schema, and function source as the authoritative operational baseline.</p>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">07 / Production readiness</div>
+    <h2>Go-live acceptance checklist</h2>
+    <p class="lead">The current repository snapshot is not sufficient evidence for production campaign sends. The system owner should close each item and retain evidence before this SOP is marked approved.</p>
+    <div class="callout critical"><strong>Known repository gaps</strong><br>The only checked-in migration is <span class="source">0001_init.sql</span>. The routed Campaigns and Settings pages reference columns/tables such as scheduled send fields, audience, campaign send status, and <span class="source">app_settings</span> that are not defined in that migration. The UI also invokes <span class="source">campaign-sender</span> and <span class="source">integration-keys</span>, but only the <span class="source">ai-writer</span> function exists in the checked-in functions folder. The map/settings import a discovery module not present in this workspace listing. Verify the deployed project has the corresponding complete schema, code, and policies; otherwise those flows are incomplete.</div>
+    <ul class="checklist two-col">
+      <li>All required migrations are present, reviewed, applied, and backed up.</li>
+      <li>Frontend typecheck and production build pass from a clean install.</li>
+      <li>All routed pages and referenced modules/functions are present and deployable.</li>
+      <li>RLS permissions are role-specific and tested with staff, approver, viewer, and admin accounts.</li>
+      <li>Campaign sender function verifies approved status server-side before sending.</li>
+      <li>Opt-outs, do-not-contact records, invalid addresses, and duplicates are excluded server-side.</li>
+      <li>Test-send and live-send are distinct; retries are idempotent.</li>
+      <li>Physical address, reply-to, and unsubscribe content are correct and tested.</li>
+      <li>Google/Resend/Deepseek secrets are configured in the correct server-side store.</li>
+      <li>AI content is reviewed for clinical/service accuracy and testimonial consent.</li>
+      <li>Provider events and failures reconcile to email and campaign records.</li>
+      <li>Backup restore, incident escalation, and key rotation procedures are tested.</li>
+    </ul>
+    <h3>Approval record</h3>
+    <table>
+      <thead><tr><th>Role</th><th>Name</th><th>Signature / approval reference</th><th>Date</th></tr></thead>
+      <tbody><tr><td>Operations owner</td><td></td><td></td><td></td></tr><tr><td>System administrator</td><td></td><td></td><td></td></tr><tr><td>Privacy / security reviewer</td><td></td><td></td><td></td></tr></tbody>
+    </table>
+    <h3>Source basis</h3>
+    <p class="small">Reviewed workspace files: <span class="source">src/App.tsx · src/lib/auth.tsx · src/lib/supabaseClient.ts · src/lib/types.ts · src/pages/app/Leads.tsx · src/pages/app/HospitalsMap.tsx · src/pages/app/AIWriter.tsx · src/pages/app/Campaigns.tsx · src/pages/app/Settings.tsx · src/pages/app/Dashboard.tsx · src/pages/app/EmailAnalytics.tsx · supabase/migrations/0001_init.sql · supabase/functions/ai-writer/index.ts · README.md</span></p>
+    <div class="endmark">END OF CONTROLLED DOCUMENT · AO-IT-SOP-001 · Version 1.0 · Revalidate against deployed configuration before use.</div>
+  </section>
+</body>
+</html>
