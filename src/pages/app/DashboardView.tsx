@@ -106,6 +106,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span>AI Assistant</span>
           </button>
         </div>
+        
       </div>
 
       {/* KPI Cards Grid */}
