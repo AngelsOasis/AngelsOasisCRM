@@ -88,6 +88,7 @@ export default function HospitalsMap() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchNotice, setSearchNotice] = useState<string | null>(null);
   // Partners (thousands of hospices/home health agencies at larger radii) start hidden.
   const [visibleGroups, setVisibleGroups] = useState<Set<Group>>(new Set(["hospital", "snf", "rehab"]));
   const [selection, setSelection] = useState<Selection>(null);
@@ -100,7 +101,7 @@ export default function HospitalsMap() {
 
   // Per facility+provider, the widest search done so far. A smaller radius is
   // served by filtering it instead of querying again.
-  const searchCache = useRef(new Map<string, { radius: number; candidates: Candidate[] }>());
+  const searchCache = useRef(new Map<string, { radius: number; candidates: Candidate[]; usedFallback: boolean }>());
   const lookedUp = useRef(new Set<string>());
 
   async function loadLeads() {
@@ -137,6 +138,9 @@ export default function HospitalsMap() {
     if (cached && cached.radius >= radius) {
       setCandidates(cached.candidates);
       setSearchError(null);
+      setSearchNotice(cached.usedFallback
+        ? "California licensed-facility search is unavailable; showing OpenStreetMap results instead."
+        : null);
       return;
     }
 
@@ -144,21 +148,35 @@ export default function HospitalsMap() {
     const timer = setTimeout(async () => {
       setSearching(true);
       setSearchError(null);
+      setSearchNotice(null);
+      let usedFallback = false;
       try {
-        const results =
-          provider === "google"
-            ? await searchGoogle(selectedFacility, radius)
-            : provider === "osm"
-              ? await searchOverpass(center[0], center[1], radius)
-              : await searchCdph(center[0], center[1], radius);
-        searchCache.current.set(cacheKey, { radius, candidates: results });
+        let results: Candidate[];
+        if (provider === "google") {
+          results = await searchGoogle(selectedFacility, radius);
+        } else if (provider === "osm") {
+          results = await searchOverpass(center[0], center[1], radius);
+        } else {
+          try {
+            results = await searchCdph(center[0], center[1], radius);
+          } catch {
+            results = await searchOverpass(center[0], center[1], radius);
+            usedFallback = true;
+            if (!cancelled) {
+              setSearchNotice(
+                "California licensed-facility search is unavailable; showing OpenStreetMap results instead."
+              );
+            }
+          }
+        }
+        searchCache.current.set(cacheKey, { radius, candidates: results, usedFallback });
         if (!cancelled) setCandidates(results);
       } catch (err) {
         if (!cancelled) {
           setCandidates([]);
           setSearchError(
             err instanceof Error
-              ? `${err.message}${provider === "osm" ? " — the free OpenStreetMap servers are often busy; try Refresh in a minute or switch to CA licensed facilities." : ""}`
+              ? `${err.message}${provider === "osm" || provider === "cdph" ? " — the free OpenStreetMap servers are often busy; try Refresh in a minute." : ""}`
               : "Search failed"
           );
         }
@@ -404,6 +422,9 @@ export default function HospitalsMap() {
             {newCandidates.length} new facilit{newCandidates.length === 1 ? "y" : "ies"} found · {visibleLeads.length} existing
             lead{visibleLeads.length === 1 ? "" : "s"} within {radius} mi
           </p>
+        )}
+        {!searching && !searchError && searchNotice && (
+          <p role="status" className="text-amber-700">{searchNotice}</p>
         )}
         {message && <p className={message.isError ? "text-red-600" : "text-plum"}>{message.text}</p>}
         {unlocatedLeads.length > 0 && !locating && (
