@@ -14,8 +14,8 @@
 //     topicHint?: string }   // optional extra context from the requester
 //
 // Output: the created content_drafts row (subject/body/cta/follow_up_body/
-// social_version/blog_version), always saved with the parent campaign left
-// at approval_status = 'pending_approval' — the AI Writer never sends anything.
+// social_version/blog_version). New campaigns are created already approved;
+// the AI Writer itself never sends anything.
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
@@ -130,7 +130,7 @@ serve(async (req) => {
           day: campaignType === "monday_newsletter" ? "monday" : campaignType === "wednesday_education" ? "wednesday" : "friday",
           send_date: new Date().toISOString().slice(0, 10),
           title: config.title,
-          approval_status: "pending_approval", // <- AI never sends; this just queues it for review
+          approval_status: "approved", // campaigns are auto-approved — no manual review step
         })
         .select()
         .single();

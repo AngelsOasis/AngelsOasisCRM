@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Download } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 import { leadLocationFields } from "../../lib/geo";
 import { LEAD_CATEGORIES, LEAD_STATUSES, type Facility, type Lead, type LeadCategory, type LeadStatus } from "../../lib/types";
@@ -78,16 +79,73 @@ export default function Leads() {
     loadLeads();
   }
 
+  function exportLeadsCSV() {
+    const headers = [
+      "Facility",
+      "Address",
+      "County",
+      "Category",
+      "Contact Person",
+      "Department",
+      "Email",
+      "Phone",
+      "Status",
+      "Source",
+      "Notes",
+      "Last Contacted",
+      "Created At",
+    ];
+    const rows = leads.map((lead) => [
+      lead.facility_name,
+      lead.address,
+      lead.county,
+      LEAD_CATEGORIES.find((category) => category.value === lead.category)?.label ?? lead.category,
+      lead.contact_person,
+      lead.department,
+      lead.email,
+      lead.phone,
+      LEAD_STATUSES.find((status) => status.value === lead.status)?.label ?? lead.status,
+      lead.source.replaceAll("_", " "),
+      lead.notes,
+      lead.last_contacted_at,
+      lead.created_at,
+    ]);
+    const escapeCell = (value: string | null) => `"${(value ?? "").replace(/"/g, '""')}"`;
+    const csv = [headers, ...rows]
+      .map((row) => row.map(escapeCell).join(","))
+      .join("\r\n");
+    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `angels-oasis-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-serif text-3xl">Leads</h1>
           <p className="mt-1 text-plum/60">Hospitals, SNFs, case managers, and other referral partners.</p>
         </div>
-        <button className="btn-primary" onClick={() => setShowForm((s) => !s)}>
-          {showForm ? "Cancel" : "Add Lead"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={exportLeadsCSV}
+            disabled={loading || leads.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg border border-plum/20 px-4 py-2 text-sm font-medium text-plum transition-colors hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="h-4 w-4" />
+            CSV Export
+          </button>
+          <button className="btn-primary" onClick={() => setShowForm((s) => !s)}>
+            {showForm ? "Cancel" : "Add Lead"}
+          </button>
+        </div>
       </div>
 
       {showForm && (

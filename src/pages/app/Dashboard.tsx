@@ -26,7 +26,7 @@ export default function Dashboard() {
             .select("*", { count: "exact", head: true })
             .eq("status", "sent")
             .gte("sent_at", weekAgo),
-          supabase.from("campaigns").select("*", { count: "exact", head: true }).eq("approval_status", "pending_approval"),
+          supabase.from("campaigns").select("*", { count: "exact", head: true }).eq("approval_status", "approved"),
         ]);
 
       setKpis({
@@ -44,7 +44,7 @@ export default function Dashboard() {
     { label: "Total Leads", value: kpis?.totalLeads },
     { label: "New Leads This Week", value: kpis?.newThisWeek },
     { label: "Emails Sent This Week", value: kpis?.emailsSentThisWeek },
-    { label: "Awaiting Approval", value: kpis?.activeCampaigns },
+    { label: "Active Campaigns", value: kpis?.activeCampaigns },
   ];
 
   return (
@@ -70,7 +70,7 @@ export default function Dashboard() {
             <li>Friday — Testimonials / Blog</li>
           </ul>
           <Link to="/app/campaigns" className="mt-4 inline-block text-sm font-semibold text-plum underline">
-            Review approval queue →
+            View campaigns →
           </Link>
         </div>
 

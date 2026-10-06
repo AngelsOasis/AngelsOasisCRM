@@ -77,9 +77,6 @@ export default function Campaigns() {
     load();
   }
 
-  const approve = (c: Campaign) =>
-    update(c.id, { approval_status: "approved", approved_by: session?.user.id ?? null, approved_at: new Date().toISOString() });
-
   function reject(c: Campaign) {
     const reason = prompt("Reason for rejecting (optional):");
     if (reason === null) return;
@@ -127,10 +124,6 @@ export default function Campaigns() {
     if (!d) return;
     setBusy(c.id);
     const { error } = await supabase.from("content_drafts").update(edit).eq("id", d.id);
-    // An edited draft marked "needs edit" goes back into the review queue.
-    if (!error && c.approval_status === "needs_edit") {
-      await supabase.from("campaigns").update({ approval_status: "pending_approval" }).eq("id", c.id);
-    }
     setBusy(null);
     if (error) {
       setMessage({ text: error.message, isError: true });
@@ -141,13 +134,11 @@ export default function Campaigns() {
   }
 
   const unsent = (c: Campaign) => c.send_status !== "sent" && c.send_status !== "sending" && c.approval_status !== "rejected";
-  const review = campaigns.filter((c) => unsent(c) && (c.approval_status === "pending_approval" || c.approval_status === "needs_edit"));
-  const ready = campaigns.filter((c) => unsent(c) && c.approval_status === "approved");
+  const ready = campaigns.filter(unsent);
   const history = campaigns.filter((c) => !unsent(c));
 
   function card(c: Campaign) {
     const draft = drafts[c.id];
-    const overdue = c.scheduled_for && new Date(c.scheduled_for) < new Date() && c.approval_status !== "approved";
     const isBusy = busy === c.id;
     return (
       <div key={c.id} className="card">
@@ -166,19 +157,9 @@ export default function Campaigns() {
               {" · "}
               {AUDIENCES.find((a) => a.value === c.audience)?.label}
             </p>
-            {overdue && (
-              <p className="mt-1 text-xs font-medium text-red-600">
-                Send time has passed — it will go out within 5 minutes of being approved.
-              </p>
-            )}
             {c.send_error && <p className="mt-1 text-xs text-red-600">{c.send_error}</p>}
           </div>
           <div className="flex flex-wrap gap-2">
-            {c.approval_status !== "approved" && (
-              <button onClick={() => approve(c)} disabled={isBusy} className="btn-primary !px-3 !py-1.5 text-xs">
-                Approve{c.scheduled_for ? " for schedule" : ""}
-              </button>
-            )}
             <button onClick={() => sendNow(c)} disabled={isBusy || !draft}
               className="rounded-full border border-plum px-3 py-1.5 text-xs font-semibold text-plum hover:bg-plum/5 disabled:opacity-50">
               {isBusy ? "Working…" : "Send now"}
@@ -191,17 +172,6 @@ export default function Campaigns() {
               className="rounded-full border border-plum/20 px-3 py-1.5 text-xs text-plum hover:bg-plum/5 disabled:opacity-50">
               Edit
             </button>
-            {c.approval_status === "approved" ? (
-              <button onClick={() => update(c.id, { approval_status: "pending_approval", approved_by: null, approved_at: null })}
-                className="rounded-full border border-plum/20 px-3 py-1.5 text-xs text-plum hover:bg-plum/5">
-                Unapprove
-              </button>
-            ) : (
-              <button onClick={() => update(c.id, { approval_status: "needs_edit" })}
-                className="rounded-full border border-plum/20 px-3 py-1.5 text-xs text-plum hover:bg-plum/5">
-                Needs edit
-              </button>
-            )}
             <button onClick={() => reject(c)}
               className="rounded-full border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
               Reject
@@ -243,19 +213,15 @@ export default function Campaigns() {
       <h1 className="font-serif text-3xl">Campaigns</h1>
       <p className="mt-1 text-plum/60">
         Drafts from the <Link to="/app/campaign-writer" className="underline">Campaign Writer</Link> land here.
-        Scheduled drafts that need approval won't send until they're approved.
+        Campaigns are approved automatically and send at their scheduled time.
       </p>
 
       {message && <p className={`mt-4 text-sm ${message.isError ? "text-red-600" : "text-plum"}`}>{message.text}</p>}
 
-      <h2 className="mt-8 font-serif text-xl">Needs your review</h2>
+      <h2 className="mt-8 font-serif text-xl">Ready to send</h2>
       {loading && <p className="mt-3 text-sm text-plum/50">Loading…</p>}
-      {!loading && review.length === 0 && <p className="mt-3 text-sm text-plum/50">Nothing waiting on approval right now.</p>}
-      <div className="mt-3 space-y-4">{review.map(card)}</div>
-
-      <h2 className="mt-10 font-serif text-xl">Approved — ready to send</h2>
       {!loading && ready.length === 0 && (
-        <p className="mt-3 text-sm text-plum/50">No approved campaigns waiting to go out.</p>
+        <p className="mt-3 text-sm text-plum/50">No campaigns waiting to go out.</p>
       )}
       <div className="mt-3 space-y-4">{ready.map(card)}</div>
 

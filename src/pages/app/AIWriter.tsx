@@ -42,8 +42,8 @@ export default function AIWriter() {
     <div>
       <h1 className="font-serif text-3xl">AI Writer</h1>
       <p className="mt-1 text-plum/60">
-        Generates a subject line, body, CTA, follow-up, social post, and blog version — always saved
-        straight into the Campaigns approval queue. Nothing here sends on its own.
+        Generates a subject line, body, CTA, follow-up, social post, and blog version — saved straight
+        into Campaigns, already approved. Nothing here sends on its own.
       </p>
 
       <div className="card mt-6 max-w-xl space-y-4">
@@ -73,7 +73,7 @@ export default function AIWriter() {
 
       {result && (
         <div className="card mt-6 max-w-2xl space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-plum/50">Draft saved to Campaigns → Pending Approval</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-plum/50">Draft saved to Campaigns → Ready to send</p>
           <div>
             <p className="text-xs text-plum/50">Subject</p>
             <p className="font-semibold">{result.subject}</p>
