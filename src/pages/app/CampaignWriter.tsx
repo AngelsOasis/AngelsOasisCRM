@@ -14,10 +14,6 @@ interface DraftFields {
   title: string;
   subject: string;
   body: string;
-  cta: string;
-  followUpBody: string;
-  socialVersion: string;
-  blogVersion: string;
 }
 
 interface SavedDraft extends DraftFields {
@@ -30,10 +26,6 @@ const EMPTY_DRAFT: DraftFields = {
   title: "",
   subject: "",
   body: "",
-  cta: "",
-  followUpBody: "",
-  socialVersion: "",
-  blogVersion: "",
 };
 
 const EMPTY_COUNTS: Record<CampaignDay, number> = {
@@ -79,7 +71,7 @@ export default function CampaignWriter() {
 
     const { data: drafts, error: draftsError } = await supabase
       .from("content_drafts")
-      .select("id, campaign_id, subject, body, cta, follow_up_body, social_version, blog_version, created_at")
+      .select("id, campaign_id, subject, body, created_at")
       .in("campaign_id", [...campaignById.keys()])
       .order("created_at", { ascending: false });
 
@@ -102,10 +94,6 @@ export default function CampaignWriter() {
         title: campaign.title,
         subject: saved.subject ?? "",
         body: saved.body ?? "",
-        cta: saved.cta ?? "",
-        followUpBody: saved.follow_up_body ?? "",
-        socialVersion: saved.social_version ?? "",
-        blogVersion: saved.blog_version ?? "",
         createdAt: saved.created_at,
       });
     }
@@ -186,10 +174,6 @@ export default function CampaignWriter() {
       campaign_id: campaign.id,
       subject: draft.subject.trim() || null,
       body: draft.body.trim() || null,
-      cta: draft.cta.trim() || null,
-      follow_up_body: draft.followUpBody.trim() || null,
-      social_version: draft.socialVersion.trim() || null,
-      blog_version: draft.blogVersion.trim() || null,
       generated_by_model: "manual",
     });
 
@@ -276,51 +260,6 @@ export default function CampaignWriter() {
           />
         </label>
 
-        <label className="block text-sm font-medium text-plum-dark">
-          Call to action
-          <input
-            className="mt-1 w-full rounded-lg border border-plum/20 px-3 py-2 font-normal"
-            value={draft.cta}
-            onChange={(event) => updateField("cta", event.target.value)}
-            placeholder="Optional call to action"
-          />
-        </label>
-
-        <details className="rounded-lg border border-plum/10 p-3">
-          <summary className="cursor-pointer text-sm font-medium text-plum-dark">
-            Optional follow-up, social, and blog copy
-          </summary>
-          <div className="mt-4 space-y-4">
-            <label className="block text-sm font-medium text-plum-dark">
-              Follow-up email
-              <textarea
-                rows={4}
-                className="mt-1 w-full rounded-lg border border-plum/20 px-3 py-2 font-normal"
-                value={draft.followUpBody}
-                onChange={(event) => updateField("followUpBody", event.target.value)}
-              />
-            </label>
-            <label className="block text-sm font-medium text-plum-dark">
-              Social post
-              <textarea
-                rows={4}
-                className="mt-1 w-full rounded-lg border border-plum/20 px-3 py-2 font-normal"
-                value={draft.socialVersion}
-                onChange={(event) => updateField("socialVersion", event.target.value)}
-              />
-            </label>
-            <label className="block text-sm font-medium text-plum-dark">
-              Blog version
-              <textarea
-                rows={6}
-                className="mt-1 w-full rounded-lg border border-plum/20 px-3 py-2 font-normal"
-                value={draft.blogVersion}
-                onChange={(event) => updateField("blogVersion", event.target.value)}
-              />
-            </label>
-          </div>
-        </details>
-
         {atLimit && (
           <p className="text-sm text-amber-700">
             This genre has reached its {MAX_DRAFTS_PER_GENRE}-draft limit. Choose another genre to save more.
@@ -356,16 +295,6 @@ export default function CampaignWriter() {
                       Saved {new Date(saved.createdAt).toLocaleString()} · Draft only, not sent
                     </p>
                     {saved.body && <p className="whitespace-pre-wrap">{saved.body}</p>}
-                    {saved.cta && <p className="font-medium text-plum">{saved.cta}</p>}
-                    {saved.followUpBody && (
-                      <p className="whitespace-pre-wrap"><strong>Follow-up:</strong>{"\n"}{saved.followUpBody}</p>
-                    )}
-                    {saved.socialVersion && (
-                      <p className="whitespace-pre-wrap"><strong>Social:</strong>{"\n"}{saved.socialVersion}</p>
-                    )}
-                    {saved.blogVersion && (
-                      <p className="whitespace-pre-wrap"><strong>Blog:</strong>{"\n"}{saved.blogVersion}</p>
-                    )}
                   </div>
                 </details>
               </li>
