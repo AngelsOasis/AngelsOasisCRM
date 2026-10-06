@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-serif: 'Playfair Display', Georgia, serif;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --brand-plum: #4A1525;
+    --brand-plum-dark: #260710;
+    --brand-plum-light: #6B2238;
+    --brand-mint: #10B981;
+    --brand-mint-soft: #34D399;
+    --brand-mint-tint: #ECFDF5;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: #1e293b;
+    background-color: #ffffff;
+  }
+
+  h1, h2, h3, .font-serif {
+    font-family: var(--font-serif);
+  }
+}
+
+/* Custom Healthcare Brand Palette (Deep Royal Plum / Burgundy + Soft Vital Mint) */
+.bg-brand-plum {
+  background-color: #4A1525;
+}
+.bg-brand-plum-dark {
+  background-color: #260710;
+}
+.bg-brand-plum-light {
+  background-color: #6B2238;
+}
+.text-brand-plum {
+  color: #4A1525;
+}
+.border-brand-plum {
+  border-color: #4A1525;
+}
+.border-brand-plum-subtle {
+  border-color: rgba(74, 21, 37, 0.15);
+}
+
+.bg-brand-mint {
+  background-color: #10B981;
+}
+.bg-brand-mint-soft {
+  background-color: #34D399;
+}
+.hover\:bg-brand-mint-dark:hover {
+  background-color: #059669;
+}
+.text-brand-mint {
+  color: #059669;
+}
+.bg-brand-mint-tint {
+  background-color: #ECFDF5;
+}
+
+/* Leaflet Map Customizations */
+.leaflet-popup-content-wrapper {
+  border-radius: 12px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+  padding: 4px !important;
+}
+
+.leaflet-popup-content {
+  margin: 12px !important;
+  font-family: var(--font-sans) !important;
+}
+
+/* Tabular numbers for dashboards */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
