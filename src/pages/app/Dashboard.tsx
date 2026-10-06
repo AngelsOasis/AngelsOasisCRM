@@ -79,7 +79,7 @@ export default function Dashboard() {
           <div className="mt-3 flex flex-wrap gap-3">
             <Link to="/app/leads" className="btn-primary !px-4 !py-2 text-sm">Add Lead</Link>
             <Link to="/app/campaigns" className="btn-primary !px-4 !py-2 text-sm">Launch Campaign</Link>
-            <Link to="/app/ai-writer" className="btn-primary !px-4 !py-2 text-sm">Generate AI Content</Link>
+            <Link to="/app/campaign-writer" className="btn-primary !px-4 !py-2 text-sm">Campaign Writer</Link>
           </div>
         </div>
       </div>

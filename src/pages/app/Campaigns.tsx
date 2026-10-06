@@ -133,9 +133,9 @@ export default function Campaigns() {
     load();
   }
 
-  const unsent = (c: Campaign) => c.send_status !== "sent" && c.send_status !== "sending" && c.approval_status !== "rejected";
+  const unsent = (c: Campaign) => !c.is_library_draft && c.send_status !== "sent" && c.send_status !== "sending" && c.approval_status !== "rejected";
   const ready = campaigns.filter(unsent);
-  const history = campaigns.filter((c) => !unsent(c));
+  const history = campaigns.filter((c) => !c.is_library_draft && !unsent(c));
 
   function card(c: Campaign) {
     const draft = drafts[c.id];
@@ -213,7 +213,7 @@ export default function Campaigns() {
       <h1 className="font-serif text-3xl">Campaigns</h1>
       <p className="mt-1 text-plum/60">
         Drafts from the <Link to="/app/campaign-writer" className="underline">Campaign Writer</Link> land here.
-        Campaigns are approved automatically and send at their scheduled time.
+        Saving a draft does not send it; use Send now only when you are ready.
       </p>
 
       {message && <p className={`mt-4 text-sm ${message.isError ? "text-red-600" : "text-plum"}`}>{message.text}</p>}

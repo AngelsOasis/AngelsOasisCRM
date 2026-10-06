@@ -93,6 +93,7 @@ export interface Campaign {
   day: CampaignDay;
   send_date: string;
   title: string;
+  is_library_draft: boolean;
   category: LeadCategory;
   audience: CampaignAudience;
   approval_status: ApprovalStatus;

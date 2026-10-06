@@ -9,7 +9,7 @@ import Leads from "./pages/app/Leads";
 import HospitalsMap from "./pages/app/HospitalsMap";
 import BedSpaceAvailability from "./pages/app/BedSpaceAvailability";
 import Campaigns from "./pages/app/Campaigns";
-import AIWriter from "./pages/app/AIWriter";
+import CampaignWriter from "./pages/app/CampaignWriter";
 import EmailAnalytics from "./pages/app/EmailAnalytics";
 import Facilities from "./pages/app/Facilities";
 import Contacts from "./pages/app/Contacts";
@@ -75,15 +75,16 @@ export default function App() {
           }
         />
         <Route
-          path="/app/ai-writer"
+          path="/app/campaign-writer"
           element={
             <ProtectedRoute>
               <AppLayout>
-                <AIWriter />
+                <CampaignWriter />
               </AppLayout>
             </ProtectedRoute>
           }
         />
+        <Route path="/app/ai-writer" element={<Navigate to="/app/campaign-writer" replace />} />
         <Route
           path="/app/email-analytics"
           element={

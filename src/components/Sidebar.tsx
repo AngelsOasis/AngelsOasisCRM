@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { to: "/app/hospitals-map", label: "Hospitals Map" },
   { to: "/app/bed-space-availability", label: "Bed Space Availability" },
   { to: "/app/campaigns", label: "Campaigns" },
-  { to: "/app/ai-writer", label: "AI Writer" },
+  { to: "/app/campaign-writer", label: "Campaign Writer" },
   { to: "/app/email-analytics", label: "Email Analytics" },
   { to: "/app/facilities", label: "Facilities" },
   { to: "/app/contacts", label: "Contacts" },
