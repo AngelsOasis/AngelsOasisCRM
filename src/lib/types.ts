@@ -52,9 +52,12 @@ export interface Lead {
   nearest_facility_id: string | null;
   distance_miles: number | null;
   contact_person: string | null;
+  contact_title: string | null;
   department: string | null;
   email: string | null;
   phone: string | null;
+  website: string | null;
+  place_id: string | null;
   category: LeadCategory;
   status: LeadStatus;
   source: LeadSource;
@@ -81,18 +84,35 @@ export interface Facility {
 
 export type ApprovalStatus = "pending_approval" | "approved" | "rejected" | "needs_edit";
 export type SendStatus = "draft" | "scheduled" | "sent" | "delivered" | "opened" | "clicked" | "replied" | "failed";
+export type CampaignSendStatus = "draft" | "scheduled" | "sending" | "sent" | "failed";
 export type CampaignDay = "monday" | "wednesday" | "friday";
+export type CampaignAudience = LeadCategory | "all";
 
 export interface Campaign {
   id: string;
   day: CampaignDay;
   send_date: string;
   title: string;
+  category: LeadCategory;
+  audience: CampaignAudience;
   approval_status: ApprovalStatus;
   approved_by: string | null;
   approved_at: string | null;
   rejection_reason: string | null;
+  send_status: CampaignSendStatus;
+  scheduled_for: string | null;
+  sent_at: string | null;
+  recipient_count: number | null;
+  send_error: string | null;
   created_at: string;
+}
+
+export interface AppSettings {
+  sender_name: string;
+  sender_email: string;
+  reply_to_email: string | null;
+  physical_address: string;
+  site_url: string;
 }
 
 export interface ContentDraft {
