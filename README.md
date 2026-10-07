@@ -14,7 +14,7 @@ deliberately an MVP: solid data model and core flows, built out further as you g
 
 | Key | Where it goes | Why |
 | --- | --- | --- |
-| Supabase **publishable** key (`sb_publishable_...`) + project URL | `.env.local` at the project root (copy `.env.example`), or your host's frontend env vars (Vercel/Netlify → Project → Environment Variables) | Safe to expose client-side by design — same idea as a Stripe publishable key |
+| Supabase **publishable** key (`sb_publishable_...`) + project URL | `.env.local` at the project root (copy `.env.example`), or your host's environment variables (`VITE_SUPABASE_URL` + `VITE_SUPABASE_PUBLISHABLE_KEY`, or Supabase's `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY`) | Safe to expose client-side by design — same idea as a Stripe publishable key |
 | Supabase **service-role** key | Supabase Edge Function secrets only, if a separately deployed server-side function requires it | Full DB access — must never reach the browser |
 | Brevo API key | Supabase Dashboard → Project Settings → Edge Functions → Secrets, as `BREVO_API_KEY` | Server-side only; never put it in frontend env files or commit it |
 | Maps/Places API key (if you swap Leaflet for Google Maps) | `.env.local` as `VITE_GOOGLE_MAPS_KEY` if it's a browser-restricted key, otherwise as a Supabase secret if used server-side for Places lookups | Depends on how you restrict the key in Google Cloud Console |
@@ -28,6 +28,8 @@ drafts directly to the authenticated Supabase tables.
 2. Project Settings → API: copy the **Project URL** and the **publishable key** into `.env.local`
    (`cp .env.example .env.local`, then fill in `VITE_SUPABASE_URL`; the publishable key given in the
    spec doc, `sb_publishable_757vU4WoOyLcRlq0wvWc4w_Nu9UbdVS`, is already filled in as an example).
+   Vercel can use either the `VITE_SUPABASE_*` names or Supabase's standard
+   `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` names; redeploy after changing environment variables.
 3. Apply the schema migrations in order: `supabase db push` (with the CLI linked), or run each
    `supabase/migrations/*.sql` file in order in the Supabase SQL editor. The campaign draft limit
    migration adds the draft-library flag and enforces a maximum of 100 saved drafts for each genre.
