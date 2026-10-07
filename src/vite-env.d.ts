@@ -9,3 +9,10 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+interface Window {
+  __ANGELS_OASIS_CONFIG__?: {
+    supabaseUrl?: string;
+    supabaseKey?: string;
+  };
+}

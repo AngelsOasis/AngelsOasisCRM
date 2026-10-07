@@ -8,8 +8,11 @@ import { createClient } from "@supabase/supabase-js";
 // Nothing secret (service-role key, Deepseek keys, email provider key) is ever
 // read here or bundled into frontend code — see supabase/functions/ai-writer
 // for where those live instead.
-const configuredUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+const configuredUrl =
+  window.__ANGELS_OASIS_CONFIG__?.supabaseUrl?.trim() ||
+  import.meta.env.VITE_SUPABASE_URL?.trim();
 const configuredKey =
+  window.__ANGELS_OASIS_CONFIG__?.supabaseKey?.trim() ||
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ||
   import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 let validUrl: string | null = null;
