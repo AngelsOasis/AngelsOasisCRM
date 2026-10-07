@@ -177,7 +177,7 @@ export default function HospitalsMap() {
           setSearchError(
             err instanceof Error
               ? err.message
-              : "Search failed"
+              : "Facility search failed unexpectedly. Please try Refresh."
           );
         }
       } finally {
