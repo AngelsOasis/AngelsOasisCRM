@@ -87,6 +87,7 @@ export type SendStatus = "draft" | "scheduled" | "sent" | "delivered" | "opened"
 export type CampaignSendStatus = "draft" | "scheduled" | "sending" | "sent" | "failed";
 export type CampaignDay = "monday" | "wednesday" | "friday";
 export type CampaignAudience = LeadCategory | "all";
+export type ScheduleWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface Campaign {
   id: string;
@@ -96,6 +97,11 @@ export interface Campaign {
   is_library_draft: boolean;
   category: LeadCategory;
   audience: CampaignAudience;
+  auto_send_enabled: boolean;
+  schedule_weekday: ScheduleWeekday | null;
+  schedule_time: string | null;
+  schedule_timezone: "America/Los_Angeles";
+  last_auto_sent_date: string | null;
   approval_status: ApprovalStatus;
   approved_by: string | null;
   approved_at: string | null;

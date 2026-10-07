@@ -172,32 +172,12 @@ export default function Settings() {
             Keys entered here are stored encrypted in Supabase Vault and only ever shown masked — they never reach the
             browser.
           </p>
-          <IntegrationKey
-            name="google_app_password"
-            label="Google Workspace App Password"
-            description={
-              <>
-                Sends campaign emails from your Google Workspace mailbox (the <strong>From address</strong> under
-                Sending) — no DNS changes needed. Signed in as that account, turn on 2-Step Verification, then create
-                a 16-character password at <strong>myaccount.google.com/apppasswords</strong>. Up to ~2,000
-                emails/day.
-              </>
-            }
-            status={status}
-            onStatus={setStatus}
-          />
-          <IntegrationKey
-            name="resend_api_key"
-            label={<>Resend API key <span className="font-normal text-plum/50">(optional alternative)</span></>}
-            description={
-              <>
-                Only used if no Google App Password is saved. Requires verifying your domain in Resend first
-                (starts with <code>re_</code>).
-              </>
-            }
-            status={status}
-            onStatus={setStatus}
-          />
+          <p className="mt-4 text-sm text-plum/60">
+            Campaign sending uses Brevo. Verify your sending domain and sender in Brevo, then add
+            <code> BREVO_API_KEY</code> in Supabase Dashboard under Project Settings → Edge Functions → Secrets
+            and deploy the <code>campaign-sender</code> function. The From address and mailing address are
+            configured in Sending below.
+          </p>
           <IntegrationKey
             name="google_places_api_key"
             label={<>Google Places API key <span className="font-normal text-plum/50">(optional)</span></>}
@@ -205,11 +185,7 @@ export default function Settings() {
             status={status}
             onStatus={setStatus}
           />
-          <p className="mt-4 text-sm text-plum/60">The AI writing keys are set directly as Edge Function secrets:</p>
-          <pre className="mt-3 overflow-x-auto rounded-lg bg-plum/5 p-3 text-xs text-plum-dark">
-{`supabase secrets set DEEPSEEK_API_KEY=sk-...
-supabase secrets set DEEPSEEK_API_KEY_FALLBACK=sk-...`}
-          </pre>
+          <p className="mt-4 text-sm text-plum/60">Campaign Writer does not require an AI provider key.</p>
           <p className="mt-3 text-xs text-plum/40">
             The Supabase URL and publishable key are the only values that belong in <code>.env.local</code> /
             your hosting provider's frontend env vars — see the README.

@@ -176,7 +176,7 @@ export default function HospitalsMap() {
           setCandidates([]);
           setSearchError(
             err instanceof Error
-              ? `${err.message}${provider === "osm" || provider === "cdph" ? " — the free OpenStreetMap servers are often busy; try Refresh in a minute." : ""}`
+              ? err.message
               : "Search failed"
           );
         }

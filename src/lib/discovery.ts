@@ -30,6 +30,12 @@ export const PROVIDER_LABEL: Record<DiscoveryProvider, string> = {
   google: "Google Places",
 };
 
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
+const OVERPASS_REQUEST_TIMEOUT_MS = 30_000;
+
 export async function functionErrorMessage(error: unknown): Promise<string> {
   const message = error instanceof Error ? error.message : "The request failed.";
   const context = error && typeof error === "object" && "context" in error
@@ -70,20 +76,7 @@ function candidateCategory(tags: Record<string, string>): LeadCategory {
   return "healthcare_organization";
 }
 
-export async function searchOverpass(
-  latitude: number,
-  longitude: number,
-  radiusMiles: number
-): Promise<Candidate[]> {
-  const radiusMeters = Math.round(radiusMiles * 1609.34);
-  const query = `[out:json][timeout:25];(node(around:${radiusMeters},${latitude},${longitude})["amenity"~"hospital|clinic|doctors|nursing_home"];way(around:${radiusMeters},${latitude},${longitude})["amenity"~"hospital|clinic|doctors|nursing_home"];relation(around:${radiusMeters},${latitude},${longitude})["amenity"~"hospital|clinic|doctors|nursing_home"];);out center tags;`;
-  const response = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-    body: new URLSearchParams({ data: query }),
-  });
-  if (!response.ok) throw new Error(`OpenStreetMap search failed (${response.status}).`);
-  const payload: unknown = await response.json();
+function parseOverpassCandidates(payload: unknown): Candidate[] {
   if (!payload || typeof payload !== "object" || !("elements" in payload) || !Array.isArray(payload.elements)) {
     throw new Error("OpenStreetMap returned an invalid search response.");
   }
@@ -112,6 +105,51 @@ export async function searchOverpass(
       provider: "osm",
     }];
   });
+}
+
+export async function searchOverpass(
+  latitude: number,
+  longitude: number,
+  radiusMiles: number
+): Promise<Candidate[]> {
+  const radiusMeters = Math.round(radiusMiles * 1609.34);
+  const amenityTypes = "hospital|clinic|doctors|nursing_home";
+  const healthcareTypes = "hospital|clinic|doctor|nursing_home|rehabilitation|hospice|home_health";
+  const around = `around:${radiusMeters},${latitude},${longitude}`;
+  const query = `[out:json][timeout:25];(nwr(${around})["amenity"~"${amenityTypes}"];nwr(${around})["healthcare"~"${healthcareTypes}"];);out center tags;`;
+  const errors: string[] = [];
+
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), OVERPASS_REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body: new URLSearchParams({ data: query }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        errors.push(`${new URL(endpoint).hostname} returned ${response.status}`);
+        continue;
+      }
+      return parseOverpassCandidates(await response.json());
+    } catch (error) {
+      errors.push(
+        `${new URL(endpoint).hostname}: ${
+          error instanceof Error
+            ? error.name === "AbortError"
+              ? "request timed out"
+              : error.message
+            : "request failed"
+        }`
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw new Error(`OpenStreetMap search failed on all available servers (${errors.join("; ")}). Try Refresh in a minute.`);
 }
 
 async function searchEdgeProvider(

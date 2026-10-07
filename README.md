@@ -16,7 +16,7 @@ deliberately an MVP: solid data model and core flows, built out further as you g
 | --- | --- | --- |
 | Supabase **publishable** key (`sb_publishable_...`) + project URL | `.env.local` at the project root (copy `.env.example`), or your host's frontend env vars (Vercel/Netlify → Project → Environment Variables) | Safe to expose client-side by design — same idea as a Stripe publishable key |
 | Supabase **service-role** key | Supabase Edge Function secrets only, if a separately deployed server-side function requires it | Full DB access — must never reach the browser |
-| Email provider key (Resend/SendGrid/etc.) | `supabase secrets set EMAIL_PROVIDER_API_KEY=...` (for the send-job function you add — see §5) | Server-side only |
+| Brevo API key | Supabase Dashboard → Project Settings → Edge Functions → Secrets, as `BREVO_API_KEY` | Server-side only; never put it in frontend env files or commit it |
 | Maps/Places API key (if you swap Leaflet for Google Maps) | `.env.local` as `VITE_GOOGLE_MAPS_KEY` if it's a browser-restricted key, otherwise as a Supabase secret if used server-side for Places lookups | Depends on how you restrict the key in Google Cloud Console |
 
 The manual Campaign Writer does not call an AI provider or require DeepSeek/API secrets. It writes
@@ -56,15 +56,12 @@ signed out. There's no public-facing page — this build is CRM only.
 required out of the box), the Campaign Writer (manual draft creation, stored in Supabase with a
 100-draft-per-genre limit), the Campaigns page,
 Email Analytics (reads real `emails` rows), Dashboard KPIs, protected routing (every `/app/*` route
-redirects to `/app/login` when signed out).
+redirects to `/app/login` when signed out), and `campaign-sender` (Brevo-backed direct/test sends,
+valid-email filtering, and suppression of unsubscribed/do-not-contact leads).
 
 **Stubbed / next steps:**
-- **The send-when-approved time trigger**
-  aren't wired up yet. Add them as [Supabase scheduled Edge Functions](https://supabase.com/docs/guides/functions/schedule-functions):
-  a cron job that queries
-  `campaigns` where `approval_status = 'approved' and send_date <= now()`, generates `emails` rows
-  from `leads`, calls your email provider, and updates `emails.status`. This second function is the
-  one place `EMAIL_PROVIDER_API_KEY` belongs.
+- **Unsubscribe automation:** the sender excludes leads already marked unsubscribed or do-not-contact.
+  It asks recipients to reply with UNSUBSCRIBE, but replies must currently be processed manually.
 - **Map-based lead auto-discovery** (Places API search within a radius) — the map currently filters
   leads you already have; swapping in Google Places for *new* facility discovery is a contained
   addition to `HospitalsMap.tsx` plus a small Edge Function to keep that key server-side.
@@ -79,6 +76,45 @@ redirects to `/app/login` when signed out).
   `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in that host's environment variable
   settings — never commit `.env.local`.
 - **Backend:** Supabase hosts your database, auth, and Edge Functions — nothing else to deploy there.
+- **Campaign sender:** verify your sending domain and sender in Brevo. In Supabase Dashboard →
+  Project Settings → Edge Functions → Secrets, add `BREVO_API_KEY` with your Brevo API key. Do not
+  put the key in `.env.local`, `.env.example`, frontend settings, or source code. Then deploy with
+  `npx supabase functions deploy campaign-sender --no-verify-jwt`. The function uses the sender name,
+  From address, Reply-to address, and physical mailing address in `app_settings`.
+- **Campaign schedules:** apply `supabase/migrations/0004_campaign_scheduling.sql`, then deploy
+  `supabase/functions/campaign-scheduler` with
+  `npx supabase functions deploy campaign-scheduler --no-verify-jwt` (the handler validates the
+  service-role bearer token itself). In Supabase SQL Editor, enable `pg_cron` and `pg_net` if needed:
+
+  ```sql
+  create extension if not exists pg_cron;
+  create extension if not exists pg_net;
+
+  select vault.create_secret('https://YOUR_PROJECT_REF.supabase.co', 'campaign_scheduler_project_url');
+  select vault.create_secret('YOUR_SERVICE_ROLE_KEY', 'campaign_scheduler_service_role_key');
+
+  select cron.schedule(
+    'campaign-scheduler-every-minute',
+    '* * * * *',
+    $$
+    select net.http_post(
+      url := (select decrypted_secret from vault.decrypted_secrets where name = 'campaign_scheduler_project_url')
+        || '/functions/v1/campaign-scheduler',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'apikey', (select decrypted_secret from vault.decrypted_secrets where name = 'campaign_scheduler_service_role_key'),
+        'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'campaign_scheduler_service_role_key')
+      ),
+      body := '{}'::jsonb
+    );
+    $$
+  );
+  ```
+
+  The scheduler claims due campaigns using `America/Los_Angeles` time and calls
+  `campaign-sender`. Both the sender and Campaigns page require at least one eligible email address;
+  the sender also filters every recipient to valid primary/additional contact emails and excludes
+  unsubscribed/do-not-contact leads.
 
 ## 6. Design system
 
