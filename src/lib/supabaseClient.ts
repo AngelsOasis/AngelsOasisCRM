@@ -8,19 +8,35 @@ import { createClient } from "@supabase/supabase-js";
 // Nothing secret (service-role key, Deepseek keys, email provider key) is ever
 // read here or bundled into frontend code — see supabase/functions/ai-writer
 // for where those live instead.
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as
-  | string
-  | undefined;
+const configuredUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+const configuredKey =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
+let validUrl: string | null = null;
+if (configuredUrl) {
+  try {
+    const parsed = new URL(configuredUrl);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+      validUrl = configuredUrl;
+    }
+  } catch {
+    // Invalid configuration is reported below and handled by the safe fallback.
+  }
+}
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
+export const isSupabaseConfigured = Boolean(validUrl && configuredKey);
 
-if (!supabaseUrl || !supabaseKey) {
+if (!isSupabaseConfigured) {
   // eslint-disable-next-line no-console
   console.warn(
-    "[supabaseClient] Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY. " +
-      "Copy .env.example to .env.local and fill in your project's values."
+    "[supabaseClient] Supabase configuration is missing or invalid. " +
+      "Set VITE_SUPABASE_URL and either VITE_SUPABASE_PUBLISHABLE_KEY or VITE_SUPABASE_ANON_KEY."
   );
 }
 
-export const supabase = createClient(supabaseUrl ?? "", supabaseKey ?? "");
+// Keep a misconfigured deployment renderable so the login page can explain
+// the problem instead of crashing during module initialization.
+export const supabase = createClient(
+  validUrl ?? "https://missing-project.supabase.co",
+  configuredKey || "missing-supabase-publishable-key"
+);
