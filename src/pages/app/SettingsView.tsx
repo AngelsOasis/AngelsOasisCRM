@@ -188,8 +188,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onResetData }) => {
             <div className="flex items-center gap-3">
               <Map className="w-5 h-5 text-rose-900" />
               <div>
-                <div className="font-semibold text-slate-900">OpenStreetMap Overpass API Proxy</div>
-                <div className="text-[11px] text-slate-500 font-mono">Endpoint: https://overpass-api.de/api/interpreter</div>
+                <div className="font-semibold text-slate-900">OpenStreetMap Overpass Search</div>
+                <div className="text-[11px] text-slate-500 font-mono">Uses public Overpass servers with automatic fallback</div>
               </div>
             </div>
             <span className="text-[10px] font-bold uppercase px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">

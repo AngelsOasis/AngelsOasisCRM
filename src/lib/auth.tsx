@@ -19,6 +19,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setLoading(false);
+    }).catch((error: unknown) => {
+      console.error("[auth] Failed to restore the Supabase session.", error);
+      setLoading(false);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {

@@ -70,20 +70,7 @@ function candidateCategory(tags: Record<string, string>): LeadCategory {
   return "healthcare_organization";
 }
 
-export async function searchOverpass(
-  latitude: number,
-  longitude: number,
-  radiusMiles: number
-): Promise<Candidate[]> {
-  const radiusMeters = Math.round(radiusMiles * 1609.34);
-  const query = `[out:json][timeout:25];(node(around:${radiusMeters},${latitude},${longitude})["amenity"~"hospital|clinic|doctors|nursing_home"];way(around:${radiusMeters},${latitude},${longitude})["amenity"~"hospital|clinic|doctors|nursing_home"];relation(around:${radiusMeters},${latitude},${longitude})["amenity"~"hospital|clinic|doctors|nursing_home"];);out center tags;`;
-  const response = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-    body: new URLSearchParams({ data: query }),
-  });
-  if (!response.ok) throw new Error(`OpenStreetMap search failed (${response.status}).`);
-  const payload: unknown = await response.json();
+function parseOverpassCandidates(payload: unknown): Candidate[] {
   if (!payload || typeof payload !== "object" || !("elements" in payload) || !Array.isArray(payload.elements)) {
     throw new Error("OpenStreetMap returned an invalid search response.");
   }
@@ -112,6 +99,32 @@ export async function searchOverpass(
       provider: "osm",
     }];
   });
+}
+
+export async function searchOverpass(
+  latitude: number,
+  longitude: number,
+  radiusMiles: number
+): Promise<Candidate[]> {
+  let response: Response;
+  try {
+    response = await fetch("/api/overpass", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ latitude, longitude, radiusMiles }),
+    });
+  } catch {
+    throw new Error("Could not reach the facility search service. Check your connection and try Refresh.");
+  }
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : `Facility search service returned an unexpected response (${response.status}).`;
+    throw new Error(message);
+  }
+  return parseOverpassCandidates(payload);
 }
 
 async function searchEdgeProvider(

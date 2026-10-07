@@ -56,7 +56,9 @@ export default function Login() {
         {!isSupabaseConfigured && (
           <p className="mt-4 rounded-lg bg-plum-50 p-3 text-xs text-plum-dark">
             Supabase is not configured. Copy <code>.env.example</code> to <code>.env.local</code>,
-            add your project URL and publishable key, then restart the dev server.
+            set <code>VITE_SUPABASE_URL</code> and either{" "}
+            <code>VITE_SUPABASE_PUBLISHABLE_KEY</code> or <code>VITE_SUPABASE_ANON_KEY</code>,
+            then redeploy.
           </p>
         )}
         <p className="mt-6 text-xs text-plum/50">
