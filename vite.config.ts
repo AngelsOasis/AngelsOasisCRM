@@ -3,10 +3,16 @@ import react from "@vitejs/plugin-react";
 
 // Serves the Vercel functions in api/ during `vite dev`, so features backed by
 // them (e.g. the Hospitals Map search) work locally without `vercel dev`.
-function vercelApiRoutes(): Plugin {
+function vercelApiRoutes(env: Record<string, string>): Plugin {
   return {
     name: "vercel-api-routes",
     configureServer(server) {
+      // Vercel gives functions their environment variables; locally they come
+      // from .env files. Server-only keys (e.g. TAVILY_KEY) stay out of the
+      // browser bundle — only the VITE_ values defined below are exposed.
+      const processEnv = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
+      for (const [key, value] of Object.entries(env)) processEnv[key] ??= value;
+
       server.middlewares.use("/api", async (incoming, res, next) => {
         // @types/node isn't installed, so describe the request fields we use.
         const req = incoming as unknown as AsyncIterable<Uint8Array> & {
@@ -81,7 +87,7 @@ export default defineConfig(({ mode }) => {
     "";
 
   return {
-    plugins: [react(), vercelApiRoutes()],
+    plugins: [react(), vercelApiRoutes(env)],
     define: {
       "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(supabaseUrl),
       "import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY": JSON.stringify(supabaseKey),

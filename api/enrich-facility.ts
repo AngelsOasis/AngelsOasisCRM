@@ -9,11 +9,21 @@ interface ApiResponse {
   json(body: unknown): void;
 }
 
+import {
+  webSearch,
+  webSearchConfigured,
+  hostOf,
+  peopleFromLinkedInResults,
+  peopleFromText,
+  pickWebsite,
+  type Person,
+} from "./_lib/osint.js";
+
 declare const process: {
   env: Record<string, string | undefined>;
 };
 
-type Source = "given" | "google" | "openstreetmap" | "website";
+type Source = "given" | "google" | "openstreetmap" | "website" | "web_search";
 
 interface Enrichment {
   website: string | null;
@@ -24,16 +34,23 @@ interface Enrichment {
   sources: { website: Source | null; phone: Source | null; email: Source | null };
   scanned: boolean;
   scanError: string | null;
+  people: Person[];
+  // Whether the web search (OSINT) step ran, and why not if it didn't.
+  webSearch: { ran: boolean; note: string | null };
 }
 
 interface FacilityInput {
   name: string;
   address: string | null;
+  city: string | null;
   latitude: number;
   longitude: number;
   phone: string | null;
   website: string | null;
 }
+
+// Website scan plus up to three web searches.
+export const config = { maxDuration: 60 };
 
 const USER_AGENT = "AngelsOasisCRM/1.0 (facility contact lookup)";
 const PAGE_TIMEOUT_MS = 7_000;
@@ -317,6 +334,9 @@ async function scanWebsite(website: string) {
     for (const page of extra) if (page.status === "fulfilled") pages.push(page.value.html);
 
     const found = pages.map(extractContacts);
+    const people = peopleFromText(
+      pages.map((page) => decodeEntities(page).replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ")).join(" ")
+    );
     const siteDomain = new URL(home.url).hostname.replace(/^www\./, "");
     // Addresses for other departments are listed, but never used as the
     // facility's outreach email.
@@ -336,8 +356,60 @@ async function scanWebsite(website: string) {
       email: emails.find((email) => !notForOutreach(email)) ?? null,
       emails,
       phones: rankByFrequency(found.flatMap((page) => page.phones)).slice(0, 5),
+      people,
     };
   });
+}
+
+// Web search (OSINT, Tavily or Brave): find the facility's own site when no directory had
+// one, pick up contacts quoted in search snippets from that site, and find
+// referral-relevant staff from LinkedIn search results (never LinkedIn pages).
+async function searchWeb(facility: FacilityInput, result: Enrichment) {
+  const place = [facility.city, "CA"].filter(Boolean).join(" ");
+  const quotedName = `"${facility.name.replace(/"/g, "")}"`;
+
+  if (!result.website) {
+    const found = pickWebsite(facility.name, await webSearch(`${quotedName} ${place}`));
+    if (found) {
+      result.website = found;
+      result.sources.website = "web_search";
+    }
+  }
+
+  if (!result.email || !result.phone) {
+    const siteHost = result.website ? hostOf(result.website) : null;
+    const results = await webSearch(`${quotedName} ${place} contact email phone`);
+    for (const item of results) {
+      const text = `${item.description} ${item.extraSnippets.join(" ")}`;
+      const contacts = extractContacts(text);
+      const onOwnSite = siteHost != null && hostOf(item.url) === siteHost;
+      // Only trust snippet emails on the facility's own domain, and snippet
+      // phones that appear on the facility's own site.
+      for (const email of contacts.emails) {
+        if (siteHost && email.endsWith(`@${siteHost}`) && !result.emails.includes(email)) result.emails.push(email);
+      }
+      if (onOwnSite) for (const phone of contacts.phones) if (!result.phones.includes(phone)) result.phones.push(phone);
+    }
+    if (!result.email) {
+      const email = result.emails.find((e) => !/noreply|no-reply|billing|vendor|media|press|privacy|jobs|career/.test(e));
+      if (email) {
+        result.email = email;
+        result.sources.email = "web_search";
+      }
+    }
+    if (!result.phone && result.phones[0]) {
+      result.phone = result.phones[0];
+      result.sources.phone = "web_search";
+    }
+  }
+
+  const linkedIn = await webSearch(
+    `${facility.name} case manager discharge planner director of nursing administrator`,
+    { domain: "linkedin.com" }
+  );
+  for (const person of peopleFromLinkedInResults(facility.name, linkedIn)) {
+    if (!result.people.some((p) => p.name === person.name)) result.people.push(person);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +429,8 @@ async function enrich(facility: FacilityInput): Promise<Enrichment> {
     sources: { website: null, phone: null, email: null },
     scanned: false,
     scanError: null,
+    people: [],
+    webSearch: { ran: false, note: null },
   };
   if (result.website) result.sources.website = "given";
   if (result.phone) result.sources.phone = "given";
@@ -380,12 +454,27 @@ async function enrich(facility: FacilityInput): Promise<Enrichment> {
     }
   }
 
+  // Without a website from the record or a directory, try web search first so
+  // the site it finds can be scanned below.
+  const searchEnabled = webSearchConfigured();
+  let searchedEarly = false;
+  if (!result.website && searchEnabled) {
+    searchedEarly = true;
+    await searchWeb(facility, result).then(
+      () => { result.webSearch.ran = true; },
+      (error: unknown) => { result.webSearch.note = error instanceof Error ? error.message : "Web search failed."; }
+    );
+  }
+
   if (result.website) {
     try {
       const scan = await scanWebsite(result.website);
       result.scanned = true;
-      result.emails = scan.emails;
-      result.phones = scan.phones;
+      result.emails = [...new Set([...scan.emails, ...result.emails])];
+      result.phones = [...new Set([...scan.phones, ...result.phones])];
+      for (const person of scan.people) {
+        if (!result.people.some((p) => p.name === person.name)) result.people.push(person);
+      }
       if (scan.email) {
         result.email = scan.email;
         result.sources.email = "website";
@@ -398,7 +487,23 @@ async function enrich(facility: FacilityInput): Promise<Enrichment> {
       result.scanError = `Couldn't scan the website: ${errorText(error)}.`;
     }
   }
+
+  if (searchEnabled && !searchedEarly) {
+    await searchWeb(facility, result).then(
+      () => { result.webSearch.ran = true; },
+      (error: unknown) => { result.webSearch.note = error instanceof Error ? error.message : "Web search failed."; }
+    );
+  } else if (!searchEnabled) {
+    result.webSearch.note = "Web search (OSINT) isn't set up — add TAVILY_API_KEY in Vercel to also search the web.";
+  }
   return result;
+}
+
+// "4929 Van Nuys Blvd, Sherman Oaks, CA, 91403" → "Sherman Oaks"
+function cityFromAddress(address: string | null) {
+  const parts = address?.split(",").map((part) => part.trim()).filter(Boolean) ?? [];
+  const stateIndex = parts.findIndex((part) => /^[A-Z]{2}(\s+\d{5})?$/.test(part));
+  return stateIndex > 0 ? parts[stateIndex - 1] : null;
 }
 
 function nullableString(value: unknown) {
@@ -426,6 +531,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   const facility: FacilityInput = {
     name,
     address: nullableString(body.address),
+    city: nullableString(body.city) ?? cityFromAddress(nullableString(body.address)),
     latitude,
     longitude,
     phone: nullableString(body.phone),

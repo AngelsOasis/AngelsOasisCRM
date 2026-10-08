@@ -15,13 +15,16 @@ import {
   getIntegrationStatus,
   searchCdph,
   searchGoogle,
+  searchOsint,
   searchOverpass,
+  mergeCandidates,
   CONTACT_SOURCE_LABEL,
   PROVIDER_LABEL,
+  SEARCH_MODE_LABEL,
   type Candidate,
   type ContactInfo,
   type ContactSource,
-  type DiscoveryProvider,
+  type SearchMode,
 } from "../../lib/discovery";
 import {
   LEAD_CATEGORIES,
@@ -79,7 +82,8 @@ type ContactLookup =
   | { status: "done"; info: ContactInfo }
   | { status: "error"; error: string };
 
-const CONTACT_CACHE_KEY = "hospitalsMap.contacts.v1";
+// v2: results now include people and web-search status.
+const CONTACT_CACHE_KEY = "hospitalsMap.contacts.v2";
 const BATCH_SIZE = 50;
 
 function loadContactCache(): Record<string, ContactLookup> {
@@ -174,6 +178,26 @@ function ContactDetails({ phone, email, website, lookup, givenSource, onRescan }
       <ContactRow label="Website" level="website" value={website ? hostname(website) : null}
         source={sourceOf("website", website)} href={website ?? undefined} />
 
+      {info && (info.people ?? []).length > 0 && (
+        <div className="text-xs">
+          <p className="text-plum/50">People found:</p>
+          <ul className="mt-0.5 space-y-0.5">
+            {info.people.map((person) => (
+              <li key={person.name}>
+                <span className="text-ink">{person.name}</span>
+                <span className="text-plum/60"> — {person.title}</span>
+                <span className="text-plum/40">
+                  {" · "}
+                  {person.url
+                    ? <a href={person.url} target="_blank" rel="noreferrer" className="underline">LinkedIn search result</a>
+                    : "on their website"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {(otherEmails.length > 0 || otherPhones.length > 0) && (
         <details className="text-xs text-plum/60">
           <summary className="cursor-pointer">Other contacts found on the website</summary>
@@ -189,6 +213,9 @@ function ContactDetails({ phone, email, website, lookup, givenSource, onRescan }
         {lookup?.status === "error" && <span className="text-red-600">{lookup.error} </span>}
         {info && !info.website && "No website found for this facility. "}
         {info?.scanError && <span className="text-amber-700">{info.scanError} </span>}
+        {info?.webSearch && !info.webSearch.ran && info.webSearch.note && (
+          <span className="text-plum/40">{info.webSearch.note} </span>
+        )}
         {info?.scanned && !info.email && !info.scanError && (info.emails.length
           ? "Only department addresses (billing, media, etc.) were found on its website. "
           : "No email address listed on its website. ")}
@@ -227,7 +254,7 @@ export default function HospitalsMap() {
   const [selectedFacility, setSelectedFacility] = useState<string>("");
   const [radius, setRadius] = useState<number>(25);
   const [customRadius, setCustomRadius] = useState("");
-  const [provider, setProvider] = useState<DiscoveryProvider>("cdph");
+  const [provider, setProvider] = useState<SearchMode>("all");
   const [googleAvailable, setGoogleAvailable] = useState(false);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [searching, setSearching] = useState(false);
@@ -254,7 +281,7 @@ export default function HospitalsMap() {
 
   // Per facility+provider, the widest search done so far. A smaller radius is
   // served by filtering it instead of querying again.
-  const searchCache = useRef(new Map<string, { radius: number; candidates: Candidate[]; usedFallback: boolean }>());
+  const searchCache = useRef(new Map<string, { radius: number; candidates: Candidate[]; notice: string | null }>());
   const lookedUp = useRef(new Set<string>());
 
   useEffect(() => saveContactCache(contacts), [contacts]);
@@ -300,19 +327,41 @@ export default function HospitalsMap() {
   // Saves newly found contact details onto a lead, never overwriting values
   // someone already entered.
   async function saveLeadContacts(lead: Lead, info: ContactInfo) {
-    const updates: Partial<Pick<Lead, "phone" | "email" | "website">> = {};
+    const updates: Partial<Pick<Lead, "phone" | "email" | "website" | "contact_person">> = {};
     if (!lead.phone && info.phone) updates.phone = info.phone;
     if (!lead.email && info.email) updates.email = info.email;
     if (!lead.website && info.website) updates.website = info.website;
-    if (!Object.keys(updates).length) return 0;
+    const people = info.people ?? [];
+    if (!lead.contact_person && people[0]) updates.contact_person = `${people[0].name} (${people[0].title})`;
 
-    const { error } = await supabase.from("leads").update(updates).eq("id", lead.id);
+    let saved = 0;
+    if (Object.keys(updates).length) {
+      const { error } = await supabase.from("leads").update(updates).eq("id", lead.id);
+      if (error) {
+        setMessage({ text: `Couldn't save contact info for ${lead.facility_name}: ${error.message}`, isError: true });
+        return 0;
+      }
+      setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, ...updates } : l)));
+      saved += Object.keys(updates).length;
+    }
+    return saved + (await savePeople(lead.id, people));
+  }
+
+  // Adds people found online to the lead's Contacts, skipping names already there.
+  async function savePeople(leadId: string, people: ContactInfo["people"]) {
+    if (!people.length) return 0;
+    const { data: existing } = await supabase.from("contacts").select("name").eq("lead_id", leadId);
+    const known = new Set(((existing as { name: string }[]) ?? []).map((c) => c.name.trim().toLowerCase()));
+    const rows = people
+      .filter((person) => !known.has(person.name.toLowerCase()))
+      .map((person) => ({ lead_id: leadId, name: person.name, title: person.title }));
+    if (!rows.length) return 0;
+    const { error } = await supabase.from("contacts").insert(rows);
     if (error) {
-      setMessage({ text: `Couldn't save contact info for ${lead.facility_name}: ${error.message}`, isError: true });
+      setMessage({ text: `Couldn't save the people found to Contacts: ${error.message}`, isError: true });
       return 0;
     }
-    setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, ...updates } : l)));
-    return Object.keys(updates).length;
+    return rows.length;
   }
 
   async function scanLead(lead: Lead, force = false) {
@@ -377,9 +426,7 @@ export default function HospitalsMap() {
     if (cached && cached.radius >= radius) {
       setCandidates(cached.candidates);
       setSearchError(null);
-      setSearchNotice(cached.usedFallback
-        ? "California licensed-facility search is unavailable; showing OpenStreetMap results instead."
-        : null);
+      setSearchNotice(cached.notice);
       return;
     }
 
@@ -388,28 +435,55 @@ export default function HospitalsMap() {
       setSearching(true);
       setSearchError(null);
       setSearchNotice(null);
-      let usedFallback = false;
+      setCandidates([]);
+      let notice: string | null = null;
       try {
         let results: Candidate[];
         if (provider === "google") {
           results = await searchGoogle(selectedFacility, radius);
         } else if (provider === "osm") {
           results = await searchOverpass(center[0], center[1], radius);
-        } else {
+        } else if (provider === "osint") {
+          const found = await searchOsint(center[0], center[1], radius);
+          results = found.candidates;
+          notice = found.notes.length ? found.notes.join(" ") : null;
+        } else if (provider === "cdph") {
           try {
             results = await searchCdph(center[0], center[1], radius);
           } catch {
             results = await searchOverpass(center[0], center[1], radius);
-            usedFallback = true;
-            if (!cancelled) {
-              setSearchNotice(
-                "California licensed-facility search is unavailable; showing OpenStreetMap results instead."
-              );
-            }
+            notice = "California licensed-facility search is unavailable; showing OpenStreetMap results instead.";
           }
+        } else {
+          // All sources: show CDPH as soon as it's back, then merge in
+          // OpenStreetMap and web search as each finishes. CDPH is passed
+          // first so its official record wins when the same facility repeats.
+          const parts: Partial<Record<"cdph" | "osm" | "osint", Candidate[]>> = {};
+          const failures: string[] = [];
+          const publish = () => {
+            if (!cancelled) setCandidates(mergeCandidates([parts.cdph ?? [], parts.osm ?? [], parts.osint ?? []]));
+          };
+          const run = (source: "cdph" | "osm" | "osint", search: () => Promise<Candidate[]>) =>
+            search().then(
+              (found) => { parts[source] = found; publish(); },
+              (err: unknown) => {
+                failures.push(`${PROVIDER_LABEL[source]}: ${err instanceof Error ? err.message : "failed"}`);
+              }
+            );
+          await Promise.all([
+            run("cdph", () => searchCdph(center[0], center[1], radius)),
+            run("osm", () => searchOverpass(center[0], center[1], radius)),
+            run("osint", () => searchOsint(center[0], center[1], radius).then((found) => found.candidates)),
+          ]);
+          if (failures.length === 3) throw new Error(`Every source failed. ${failures.join(" · ")}`);
+          results = mergeCandidates([parts.cdph ?? [], parts.osm ?? [], parts.osint ?? []]);
+          notice = failures.length ? `Some sources were skipped — ${failures.join(" · ")}` : null;
         }
-        searchCache.current.set(cacheKey, { radius, candidates: results, usedFallback });
-        if (!cancelled) setCandidates(results);
+        searchCache.current.set(cacheKey, { radius, candidates: results, notice });
+        if (!cancelled) {
+          setCandidates(results);
+          setSearchNotice(notice);
+        }
       } catch (err) {
         if (!cancelled) {
           setCandidates([]);
@@ -607,6 +681,7 @@ export default function HospitalsMap() {
         longitude: candidate.longitude,
         phone: candidate.phone ?? info?.phone ?? null,
         email: info?.email ?? null,
+        contact_person: info?.people?.[0] ? `${info.people[0].name} (${info.people[0].title})` : null,
         website: candidate.website ?? info?.website ?? null,
         category: candidate.category,
         place_id: candidate.key,
@@ -631,7 +706,10 @@ export default function HospitalsMap() {
     scannedLeads.current.add(lead.id); // already looked up above
     setLeads((prev) => [lead, ...prev]);
     setSelection({ type: "lead", id: lead.id });
-    setMessage({ text: `Added ${lead.facility_name} to Leads.` });
+    const people = await savePeople(lead.id, info?.people ?? []);
+    setMessage({
+      text: `Added ${lead.facility_name} to Leads${people ? ` with ${people} contact${people === 1 ? "" : "s"} found online` : ""}.`,
+    });
   }
 
   async function locateLeads() {
@@ -712,9 +790,11 @@ export default function HospitalsMap() {
         </span>
         <span className="ml-auto flex items-center gap-2">
           <select className="rounded-lg border border-plum/20 px-2 py-1 text-sm"
-            value={provider} onChange={(e) => setProvider(e.target.value as DiscoveryProvider)}>
-            <option value="cdph">{PROVIDER_LABEL.cdph} — free</option>
-            <option value="osm">{PROVIDER_LABEL.osm} — free, slower</option>
+            value={provider} onChange={(e) => setProvider(e.target.value as SearchMode)}>
+            <option value="all">All sources combined (CDPH, OSM, OSINT)</option>
+            <option value="cdph">California licensed facilities — free (CDPH)</option>
+            <option value="osm">OpenStreetMap — free, slower (OSM)</option>
+            <option value="osint">Web search — Tavily (OSINT)</option>
             <option value="google" disabled={!googleAvailable}>
               Google Places{googleAvailable ? "" : " — add key in Settings"}
             </option>
@@ -768,8 +848,10 @@ export default function HospitalsMap() {
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
         {searching && (
           <p className="text-plum/70">
-            Searching {PROVIDER_LABEL[provider]} within {radius} mi…
+            Searching {SEARCH_MODE_LABEL[provider]} within {radius} mi…
+            {provider === "all" && newCandidates.length > 0 && ` ${newCandidates.length} found so far, still checking other sources.`}
             {provider === "osm" && " (public OpenStreetMap servers can take a minute or more)"}
+            {(provider === "osint" || provider === "all") && " Web search can take up to a minute."}
           </p>
         )}
         {!searching && searchError && <p className="text-red-600">{searchError}</p>}
@@ -895,7 +977,8 @@ export default function HospitalsMap() {
                 onRescan={() => lookupContacts(selectedCandidate.key, selectedCandidateRaw!, true)}
               />
               <p className="text-xs text-plum/40">
-                Source: {PROVIDER_LABEL[selectedCandidate.provider]} · not yet a lead, so no outreach history.
+                Source: {(selectedCandidate.sources ?? [selectedCandidate.provider]).map((p) => PROVIDER_LABEL[p]).join(", ")}
+                {" "}· not yet a lead, so no outreach history.
               </p>
               <button className="btn-primary mt-2 w-full" disabled={adding} onClick={() => addAsLead(selectedCandidate)}>
                 {adding
