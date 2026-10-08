@@ -170,6 +170,8 @@ function EditBedSpaceModal({ facility, beds, onClose, onSaved }: {
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Text typed into an "Open" box while it has focus (may be mid-edit/blank).
+  const [openDrafts, setOpenDrafts] = useState<Record<string, string>>({});
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const errors = validate(form);
@@ -231,19 +233,55 @@ function EditBedSpaceModal({ facility, beds, onClose, onSaved }: {
     onSaved(data as FacilityBedAvailability);
   }
 
-  const countInput = (field: CountField, label: string, suffix?: string) => (
+  const countInput = (field: CountField, label: string) => (
     <div>
       <label htmlFor={field} className="mb-1 block text-sm text-plum/80">{label}</label>
-      <div className="relative">
-        <input id={field} type="number" min={0} step={1} inputMode="numeric"
-          className={`${inputClass} ${suffix ? "pr-24" : ""} ${touched && errors[field] ? "border-red-500" : ""}`}
-          value={form[field]} onChange={(e) => set(field, e.target.value)} onBlur={() => setTouched(true)}
-          aria-invalid={touched && !!errors[field]} aria-describedby={errors[field] ? `${field}-error` : undefined} />
-        {suffix && (
-          <span className="pointer-events-none absolute inset-y-0 right-8 flex items-center text-sm text-plum/60">{suffix}</span>
-        )}
-      </div>
+      <input id={field} type="number" min={0} step={1} inputMode="numeric"
+        className={`${inputClass} ${touched && errors[field] ? "border-red-500" : ""}`}
+        value={form[field]} onChange={(e) => set(field, e.target.value)} onBlur={() => setTouched(true)}
+        aria-invalid={touched && !!errors[field]} aria-describedby={errors[field] ? `${field}-error` : undefined} />
       {touched && errors[field] && <p id={`${field}-error`} className="mt-1 text-xs text-red-600">{errors[field]}</p>}
+    </div>
+  );
+
+  // "Open" is total − occupied. It can be typed too: entering how many are
+  // open fills in Occupied, so staff can update whichever number they know.
+  const openInput = (total: CountField, occupied: CountField, label: string) => {
+    const id = `${occupied}-open`;
+    const draft = openDrafts[id];
+    const derived = openOf(total, occupied);
+    const typed = draft !== undefined ? count(draft) : NaN;
+    const tooMany = draft !== undefined && Number.isFinite(typed) && typed > count(form[total]);
+    return (
+      <div>
+        <label htmlFor={id} className="mb-1 block text-sm text-plum/80">{label}</label>
+        <input id={id} type="number" min={0} step={1} inputMode="numeric"
+          className={`${inputClass} bg-emerald-50/60 ${tooMany ? "border-red-500" : ""}`}
+          value={draft ?? (derived === "—" ? "" : String(derived))}
+          onChange={(e) => {
+            const text = e.target.value;
+            setOpenDrafts((prev) => ({ ...prev, [id]: text }));
+            const open = count(text);
+            const totalValue = count(form[total]);
+            if (Number.isFinite(open) && Number.isFinite(totalValue) && open <= totalValue) {
+              set(occupied, String(totalValue - open));
+            }
+          }}
+          onBlur={() => setOpenDrafts(({ [id]: _, ...rest }) => rest)}
+          aria-invalid={tooMany} aria-describedby={tooMany ? `${id}-error` : undefined} />
+        {tooMany && <p id={`${id}-error`} className="mt-1 text-xs text-red-600">Can't be more than the total.</p>}
+      </div>
+    );
+  };
+
+  const countRow = (title: string, total: CountField, occupied: CountField, labels: [string, string, string]) => (
+    <div>
+      <p className="mb-1.5 text-sm font-semibold text-ink">{title}</p>
+      <div className="grid grid-cols-3 gap-3">
+        {countInput(total, labels[0])}
+        {countInput(occupied, labels[1])}
+        {openInput(total, occupied, labels[2])}
+      </div>
     </div>
   );
 
@@ -277,20 +315,14 @@ function EditBedSpaceModal({ facility, beds, onClose, onSaved }: {
             </div>
 
             <fieldset>
-              <legend className="mb-2 font-sans text-base font-semibold text-ink">Bed Counts</legend>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
-                {countInput("total_beds", "Total Beds")}
-                {countInput("occupied_beds", "Occupied Beds")}
-                <div className="rounded-lg bg-plum/5 px-4 py-2" aria-live="polite">
-                  <p className="text-sm text-plum/80">Open Beds</p>
-                  <p className="text-xl tabular-nums text-ink">{openOf("total_beds", "occupied_beds")}</p>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {countInput("shared_rooms_total", "Shared Rooms Total")}
-                {countInput("shared_rooms_occupied", "Shared Occupied", `Open: ${openOf("shared_rooms_total", "shared_rooms_occupied")}`)}
-                {countInput("private_rooms_total", "Private Rooms Total")}
-                {countInput("private_rooms_occupied", "Private Occupied", `Open: ${openOf("private_rooms_total", "private_rooms_occupied")}`)}
+              <legend className="font-sans text-base font-semibold text-ink">Bed Counts</legend>
+              <p className="mb-3 text-xs text-plum/60">
+                Type either Occupied or Open — the other fills in automatically.
+              </p>
+              <div className="space-y-4">
+                {countRow("Beds", "total_beds", "occupied_beds", ["Total Beds", "Occupied Beds", "Open Beds"])}
+                {countRow("Shared Rooms", "shared_rooms_total", "shared_rooms_occupied", ["Total", "Occupied", "Open"])}
+                {countRow("Private Rooms", "private_rooms_total", "private_rooms_occupied", ["Total", "Occupied", "Open"])}
               </div>
             </fieldset>
 
