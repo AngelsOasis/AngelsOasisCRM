@@ -10,13 +10,17 @@ import {
   NOMINATIM_DELAY_MS,
 } from "../../lib/geo";
 import {
+  findContactInfo,
   findMatchingLead,
   getIntegrationStatus,
   searchCdph,
   searchGoogle,
   searchOverpass,
+  CONTACT_SOURCE_LABEL,
   PROVIDER_LABEL,
   type Candidate,
+  type ContactInfo,
+  type ContactSource,
   type DiscoveryProvider,
 } from "../../lib/discovery";
 import { LEAD_CATEGORIES, type Facility, type Lead, type LeadCategory } from "../../lib/types";
@@ -44,6 +48,54 @@ function groupOf(category: LeadCategory): Group {
   return "partner";
 }
 
+// Contact legend: each marker shows the best way to reach the facility.
+type ContactLevel = "email" | "phone" | "website" | "none";
+type ColorBy = "type" | "contact";
+
+const CONTACT_GROUPS: { id: ContactLevel; label: string; color: string }[] = [
+  { id: "email", label: "Has email", color: "#16A34A" },
+  { id: "phone", label: "Contact number (no email)", color: "#2563EB" },
+  { id: "website", label: "Website only", color: "#F59E0B" },
+  { id: "none", label: "No contact info yet", color: "#9CA3AF" },
+];
+
+const CONTACT_COLOR = Object.fromEntries(CONTACT_GROUPS.map((g) => [g.id, g.color])) as Record<ContactLevel, string>;
+
+function contactLevel(c: { email?: string | null; phone?: string | null; website?: string | null }): ContactLevel {
+  if (c.email) return "email";
+  if (c.phone) return "phone";
+  if (c.website) return "website";
+  return "none";
+}
+
+type ContactLookup =
+  | { status: "loading" }
+  | { status: "done"; info: ContactInfo }
+  | { status: "error"; error: string };
+
+const CONTACT_CACHE_KEY = "hospitalsMap.contacts.v1";
+const BATCH_SIZE = 50;
+
+function loadContactCache(): Record<string, ContactLookup> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CONTACT_CACHE_KEY) ?? "{}") as Record<string, ContactInfo>;
+    return Object.fromEntries(Object.entries(saved).map(([key, info]) => [key, { status: "done", info }]));
+  } catch {
+    return {};
+  }
+}
+
+function saveContactCache(lookups: Record<string, ContactLookup>) {
+  try {
+    const done = Object.entries(lookups).flatMap(([key, lookup]) =>
+      lookup.status === "done" && !key.startsWith("lead:") ? [[key, lookup.info] as const] : []
+    );
+    localStorage.setItem(CONTACT_CACHE_KEY, JSON.stringify(Object.fromEntries(done)));
+  } catch {
+    // Storage unavailable (private mode, quota) — results just won't persist.
+  }
+}
+
 const categoryLabel = (c: LeadCategory) => LEAD_CATEGORIES.find((x) => x.value === c)?.label ?? c;
 
 // MapContainer only reads `center` on first render, so pan/zoom imperatively
@@ -64,6 +116,82 @@ function hostname(url: string) {
   } catch {
     return url;
   }
+}
+
+function ContactRow({ label, level, value, source, href }: {
+  label: string;
+  level: ContactLevel;
+  value: string | null;
+  source: string | null;
+  href?: string;
+}) {
+  return (
+    <p className="flex items-start gap-1.5">
+      <span className="mt-1 inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: CONTACT_COLOR[level] }} />
+      <span className="min-w-0">
+        <span className="text-plum/50">{label}:</span>{" "}
+        {value
+          ? href
+            ? <a href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer" className="break-all underline">{value}</a>
+            : value
+          : "—"}
+        {value && source && <span className="block text-xs text-plum/40">{source}</span>}
+      </span>
+    </p>
+  );
+}
+
+function ContactDetails({ phone, email, website, lookup, givenSource, onRescan }: {
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  lookup: ContactLookup | undefined;
+  givenSource: string;
+  onRescan: () => void;
+}) {
+  const info = lookup?.status === "done" ? lookup.info : null;
+  const sourceOf = (field: "phone" | "email" | "website", value: string | null) => {
+    const source: ContactSource | null | undefined = info?.sources[field];
+    if (!value) return null;
+    if (info && value === info[field] && source && source !== "given") return CONTACT_SOURCE_LABEL[source];
+    return `from ${givenSource}`;
+  };
+  const otherEmails = info?.emails.filter((e) => e !== email) ?? [];
+  const otherPhones = info?.phones.filter((p) => p !== phone) ?? [];
+
+  return (
+    <div className="space-y-1.5">
+      <ContactRow label="Contact number" level="phone" value={phone} source={sourceOf("phone", phone)}
+        href={phone ? `tel:${phone.replace(/[^\d+]/g, "")}` : undefined} />
+      <ContactRow label="Email" level="email" value={email} source={sourceOf("email", email)}
+        href={email ? `mailto:${email}` : undefined} />
+      <ContactRow label="Website" level="website" value={website ? hostname(website) : null}
+        source={sourceOf("website", website)} href={website ?? undefined} />
+
+      {(otherEmails.length > 0 || otherPhones.length > 0) && (
+        <details className="text-xs text-plum/60">
+          <summary className="cursor-pointer">Other contacts found on the website</summary>
+          <ul className="mt-1 space-y-0.5 pl-3">
+            {otherEmails.map((e) => <li key={e}><a className="underline" href={`mailto:${e}`}>{e}</a></li>)}
+            {otherPhones.map((p) => <li key={p}>{p}</li>)}
+          </ul>
+        </details>
+      )}
+
+      <p className="text-xs text-plum/50">
+        {lookup?.status === "loading" && "Finding website and scanning it for contact info…"}
+        {lookup?.status === "error" && <span className="text-red-600">{lookup.error} </span>}
+        {info && !info.website && "No website found for this facility. "}
+        {info?.scanError && <span className="text-amber-700">{info.scanError} </span>}
+        {info?.scanned && !info.email && !info.scanError && (info.emails.length
+          ? "Only department addresses (billing, media, etc.) were found on its website. "
+          : "No email address listed on its website. ")}
+        {lookup && lookup.status !== "loading" && (
+          <button className="underline" onClick={onRescan}>Scan again</button>
+        )}
+      </p>
+    </div>
+  );
 }
 
 interface OutreachEmail {
@@ -98,11 +226,97 @@ export default function HospitalsMap() {
   const [locating, setLocating] = useState(false);
   const [message, setMessage] = useState<{ text: string; isError?: boolean } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [colorBy, setColorBy] = useState<ColorBy>("type");
+  const [visibleContacts, setVisibleContacts] = useState<Set<ContactLevel>>(
+    new Set(["email", "phone", "website", "none"])
+  );
+  // Contact lookups by candidate key, or `lead:<id>` for existing leads.
+  const [contacts, setContacts] = useState<Record<string, ContactLookup>>(loadContactCache);
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
+  const contactRequests = useRef(new Map<string, Promise<ContactInfo | null>>());
+  const cancelBatch = useRef(false);
 
   // Per facility+provider, the widest search done so far. A smaller radius is
   // served by filtering it instead of querying again.
   const searchCache = useRef(new Map<string, { radius: number; candidates: Candidate[]; usedFallback: boolean }>());
   const lookedUp = useRef(new Set<string>());
+
+  useEffect(() => saveContactCache(contacts), [contacts]);
+
+  // Looks up a facility's website and scans it for email/phone. Concurrent
+  // calls for the same key share one request.
+  function lookupContacts(
+    key: string,
+    facility: Parameters<typeof findContactInfo>[0],
+    force = false
+  ): Promise<ContactInfo | null> {
+    const pending = contactRequests.current.get(key);
+    if (pending) return pending;
+    const existing = contacts[key];
+    if (!force && existing?.status === "done") return Promise.resolve(existing.info);
+
+    setContacts((prev) => ({ ...prev, [key]: { status: "loading" } }));
+    const request = findContactInfo(facility)
+      .then((info) => {
+        setContacts((prev) => ({ ...prev, [key]: { status: "done", info } }));
+        return info;
+      })
+      .catch((err: unknown) => {
+        const error = err instanceof Error ? err.message : "Contact lookup failed.";
+        setContacts((prev) => ({ ...prev, [key]: { status: "error", error } }));
+        return null;
+      })
+      .finally(() => contactRequests.current.delete(key));
+    contactRequests.current.set(key, request);
+    return request;
+  }
+
+  function candidateContacts(c: Candidate) {
+    const lookup = contacts[c.key];
+    const info = lookup?.status === "done" ? lookup.info : null;
+    return {
+      phone: c.phone ?? info?.phone ?? null,
+      email: info?.email ?? null,
+      website: c.website ?? info?.website ?? null,
+    };
+  }
+
+  // Saves newly found contact details onto a lead, never overwriting values
+  // someone already entered.
+  async function saveLeadContacts(lead: Lead, info: ContactInfo) {
+    const updates: Partial<Pick<Lead, "phone" | "email" | "website">> = {};
+    if (!lead.phone && info.phone) updates.phone = info.phone;
+    if (!lead.email && info.email) updates.email = info.email;
+    if (!lead.website && info.website) updates.website = info.website;
+    if (!Object.keys(updates).length) return 0;
+
+    const { error } = await supabase.from("leads").update(updates).eq("id", lead.id);
+    if (error) {
+      setMessage({ text: `Couldn't save contact info for ${lead.facility_name}: ${error.message}`, isError: true });
+      return 0;
+    }
+    setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, ...updates } : l)));
+    return Object.keys(updates).length;
+  }
+
+  async function scanLead(lead: Lead, force = false) {
+    if (lead.latitude == null || lead.longitude == null) return;
+    const info = await lookupContacts(
+      `lead:${lead.id}`,
+      {
+        name: lead.facility_name,
+        address: lead.address,
+        latitude: lead.latitude,
+        longitude: lead.longitude,
+        phone: lead.phone,
+        website: lead.website,
+      },
+      force
+    );
+    if (!info) return;
+    const saved = await saveLeadContacts(lead, info);
+    if (saved) setMessage({ text: `Saved ${saved} new contact detail${saved === 1 ? "" : "s"} for ${lead.facility_name}.` });
+  }
 
   async function loadLeads() {
     const { data } = await supabase.from("leads").select("*");
@@ -200,10 +414,11 @@ export default function HospitalsMap() {
           l.latitude != null &&
           l.longitude != null &&
           inRadius(l.latitude, l.longitude) &&
-          visibleGroups.has(groupOf(l.category))
+          visibleGroups.has(groupOf(l.category)) &&
+          visibleContacts.has(contactLevel(l))
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [leads, center, radius, visibleGroups]
+    [leads, center, radius, visibleGroups, visibleContacts]
   );
 
   // Candidates that aren't already leads (those show as lead markers instead).
@@ -216,13 +431,32 @@ export default function HospitalsMap() {
     [candidates, leads, center, radius]
   );
 
-  const shownCandidates = newCandidates.filter((c) => visibleGroups.has(groupOf(c.category)));
+  const candidateLevels = useMemo(
+    () => new Map(newCandidates.map((c) => [c.key, contactLevel(candidateContacts(c))])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [newCandidates, contacts]
+  );
+
+  const shownCandidates = newCandidates.filter(
+    (c) => visibleGroups.has(groupOf(c.category)) && visibleContacts.has(candidateLevels.get(c.key)!)
+  );
 
   const groupCounts = useMemo(() => {
     const counts: Record<Group, number> = { hospital: 0, snf: 0, rehab: 0, partner: 0 };
     for (const c of newCandidates) counts[groupOf(c.category)]++;
     return counts;
   }, [newCandidates]);
+
+  // Contact counts cover the facility types currently shown.
+  const contactCounts = useMemo(() => {
+    const counts: Record<ContactLevel, number> = { email: 0, phone: 0, website: 0, none: 0 };
+    for (const c of newCandidates) {
+      if (visibleGroups.has(groupOf(c.category))) counts[candidateLevels.get(c.key)!]++;
+    }
+    return counts;
+  }, [newCandidates, candidateLevels, visibleGroups]);
+
+  const unscannedShown = shownCandidates.filter((c) => !contacts[c.key]);
 
   const unlocatedLeads = useMemo(
     () => leads.filter((l) => (l.latitude == null || l.longitude == null) && l.address?.trim()),
@@ -250,6 +484,43 @@ export default function HospitalsMap() {
       .then((result) => setEnriched((prev) => ({ ...prev, [c.key]: result ?? { address: null, county: null } })));
   }, [selectedCandidateRaw]);
 
+  // Find the website and scan it for email/phone as soon as a facility is opened.
+  useEffect(() => {
+    const c = selectedCandidateRaw;
+    if (!c || contacts[c.key]) return;
+    lookupContacts(c.key, c);
+  }, [selectedCandidateRaw]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Existing leads missing a phone, email, or website get the same lookup once
+  // per session; anything found is saved to the lead.
+  const scannedLeads = useRef(new Set<string>());
+  useEffect(() => {
+    if (!selectedLead || scannedLeads.current.has(selectedLead.id)) return;
+    if (selectedLead.phone && selectedLead.email && selectedLead.website) return;
+    scannedLeads.current.add(selectedLead.id);
+    scanLead(selectedLead);
+  }, [selectedLead?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function findShownContacts() {
+    const queue = unscannedShown.slice(0, BATCH_SIZE);
+    const total = queue.length;
+    cancelBatch.current = false;
+    setBatch({ done: 0, total });
+    setColorBy("contact");
+    setMessage(null);
+    let done = 0;
+    // Two at a time: the OpenStreetMap lookup allows about one request per second.
+    const worker = async () => {
+      while (queue.length && !cancelBatch.current) {
+        const c = queue.shift()!;
+        await lookupContacts(c.key, c);
+        setBatch({ done: ++done, total });
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    setBatch(null);
+  }
+
   // Outreach history for an opened lead.
   useEffect(() => {
     if (!selectedLead) return;
@@ -276,6 +547,15 @@ export default function HospitalsMap() {
     });
   }
 
+  function toggleContact(level: ContactLevel) {
+    setVisibleContacts((prev) => {
+      const next = new Set(prev);
+      if (next.has(level)) next.delete(level);
+      else next.add(level);
+      return next;
+    });
+  }
+
   async function addAsLead(candidate: Candidate) {
     setAdding(true);
     setMessage(null);
@@ -288,6 +568,9 @@ export default function HospitalsMap() {
       return;
     }
 
+    // Record the contact number, email, and website from the start: reuse the
+    // lookup already made when the facility was opened, or run it now.
+    const info = await lookupContacts(candidate.key, candidate);
     const nearest = nearestFacility(facilities, candidate.latitude, candidate.longitude);
     const { data, error } = await supabase
       .from("leads")
@@ -297,8 +580,9 @@ export default function HospitalsMap() {
         county: candidate.county,
         latitude: candidate.latitude,
         longitude: candidate.longitude,
-        phone: candidate.phone,
-        website: candidate.website,
+        phone: candidate.phone ?? info?.phone ?? null,
+        email: info?.email ?? null,
+        website: candidate.website ?? info?.website ?? null,
         category: candidate.category,
         place_id: candidate.key,
         nearest_facility_id: nearest?.facility.id ?? null,
@@ -319,6 +603,7 @@ export default function HospitalsMap() {
       return;
     }
     const lead = data as Lead;
+    scannedLeads.current.add(lead.id); // already looked up above
     setLeads((prev) => [lead, ...prev]);
     setSelection({ type: "lead", id: lead.id });
     setMessage({ text: `Added ${lead.facility_name} to Leads.` });
@@ -383,13 +668,17 @@ export default function HospitalsMap() {
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-        {GROUPS.map((g) => (
-          <label key={g.id} className="flex cursor-pointer items-center gap-1.5">
-            <input type="checkbox" checked={visibleGroups.has(g.id)} onChange={() => toggleGroup(g.id)} />
-            <span className="inline-block h-3 w-3 rounded-full" style={{ background: g.color }} />
-            {g.label} <span className="text-plum/40">({groupCounts[g.id]})</span>
-          </label>
-        ))}
+        <div className="flex items-center gap-2">
+          <span className="text-plum/60">Color markers by</span>
+          <div className="flex overflow-hidden rounded-lg border border-plum/20">
+            {([["type", "Facility type"], ["contact", "Contact info"]] as const).map(([value, label]) => (
+              <button key={value} onClick={() => setColorBy(value)}
+                className={`px-3 py-1 text-sm ${colorBy === value ? "bg-plum text-white" : "bg-white text-plum"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <span className="flex items-center gap-1.5 text-plum/60">
           <span className="inline-block h-3 w-3 rounded-full border-2 border-black bg-plum/30" /> Already a lead
         </span>
@@ -408,6 +697,45 @@ export default function HospitalsMap() {
           </button>
         </span>
       </div>
+
+      <fieldset className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-plum/10 px-3 py-2 text-sm">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-plum/50">Facility type</legend>
+        {GROUPS.map((g) => (
+          <label key={g.id} className="flex cursor-pointer items-center gap-1.5">
+            <input type="checkbox" checked={visibleGroups.has(g.id)} onChange={() => toggleGroup(g.id)} />
+            <span className="inline-block h-3 w-3 rounded-full"
+              style={{ background: colorBy === "type" ? g.color : "transparent", border: `2px solid ${g.color}` }} />
+            {g.label} <span className="text-plum/40">({groupCounts[g.id]})</span>
+          </label>
+        ))}
+      </fieldset>
+
+      <fieldset className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-plum/10 px-3 py-2 text-sm">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-plum/50">Contact info</legend>
+        {CONTACT_GROUPS.map((g) => (
+          <label key={g.id} className="flex cursor-pointer items-center gap-1.5">
+            <input type="checkbox" checked={visibleContacts.has(g.id)} onChange={() => toggleContact(g.id)} />
+            <span className="inline-block h-3 w-3 rounded-full"
+              style={{ background: colorBy === "contact" ? g.color : "transparent", border: `2px solid ${g.color}` }} />
+            {g.label} <span className="text-plum/40">({contactCounts[g.id]})</span>
+          </label>
+        ))}
+        <span className="ml-auto flex items-center gap-2">
+          {batch ? (
+            <>
+              <span className="text-plum/70">Scanning websites… {batch.done} of {batch.total}</span>
+              <button className="text-plum underline" onClick={() => { cancelBatch.current = true; }}>Stop</button>
+            </>
+          ) : unscannedShown.length > 0 && (
+            <button className="text-plum underline" onClick={findShownContacts}
+              title="Finds each facility's website and scans it for an email address and contact number">
+              Find contact info for {Math.min(unscannedShown.length, BATCH_SIZE)}
+              {unscannedShown.length > BATCH_SIZE ? ` of ${unscannedShown.length}` : ""} shown facilit
+              {unscannedShown.length === 1 ? "y" : "ies"}
+            </button>
+          )}
+        </span>
+      </fieldset>
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
         {searching && (
@@ -454,7 +782,14 @@ export default function HospitalsMap() {
                 key={c.key}
                 center={[c.latitude, c.longitude]}
                 radius={selection?.type === "candidate" && selection.key === c.key ? 9 : 6}
-                pathOptions={{ color: "#fff", weight: 1.5, fillColor: GROUP_COLOR[groupOf(c.category)], fillOpacity: 0.9 }}
+                pathOptions={{
+                  color: "#fff",
+                  weight: 1.5,
+                  fillColor: colorBy === "contact"
+                    ? CONTACT_COLOR[candidateLevels.get(c.key)!]
+                    : GROUP_COLOR[groupOf(c.category)],
+                  fillOpacity: 0.9,
+                }}
                 eventHandlers={{ click: () => { setSelection({ type: "candidate", key: c.key }); setMessage(null); } }}
               >
                 <Tooltip>{c.name}</Tooltip>
@@ -465,7 +800,12 @@ export default function HospitalsMap() {
                 key={lead.id}
                 center={[lead.latitude!, lead.longitude!]}
                 radius={selection?.type === "lead" && selection.id === lead.id ? 10 : 8}
-                pathOptions={{ color: "#0A0A0A", weight: 2.5, fillColor: GROUP_COLOR[groupOf(lead.category)], fillOpacity: 1 }}
+                pathOptions={{
+                  color: "#0A0A0A",
+                  weight: 2.5,
+                  fillColor: colorBy === "contact" ? CONTACT_COLOR[contactLevel(lead)] : GROUP_COLOR[groupOf(lead.category)],
+                  fillOpacity: 1,
+                }}
                 eventHandlers={{ click: () => { setSelection({ type: "lead", id: lead.id }); setMessage(null); } }}
               >
                 <Tooltip>{lead.facility_name} (lead)</Tooltip>
@@ -498,19 +838,19 @@ export default function HospitalsMap() {
                 from selected facility
               </p>
               <hr className="my-2 border-plum/10" />
-              <p><span className="text-plum/50">Phone:</span> {selectedCandidate.phone || "—"}</p>
-              <p>
-                <span className="text-plum/50">Website:</span>{" "}
-                {selectedCandidate.website
-                  ? <a href={selectedCandidate.website} target="_blank" rel="noreferrer" className="underline">{hostname(selectedCandidate.website)}</a>
-                  : "—"}
-              </p>
+              <ContactDetails
+                {...candidateContacts(selectedCandidate)}
+                lookup={contacts[selectedCandidate.key]}
+                givenSource={PROVIDER_LABEL[selectedCandidate.provider]}
+                onRescan={() => lookupContacts(selectedCandidate.key, selectedCandidateRaw!, true)}
+              />
               <p className="text-xs text-plum/40">
-                Source: {PROVIDER_LABEL[selectedCandidate.provider]} · not yet a lead, so no
-                contact or outreach history.
+                Source: {PROVIDER_LABEL[selectedCandidate.provider]} · not yet a lead, so no outreach history.
               </p>
               <button className="btn-primary mt-2 w-full" disabled={adding} onClick={() => addAsLead(selectedCandidate)}>
-                {adding ? "Adding…" : "+ Add as Lead"}
+                {adding
+                  ? contacts[selectedCandidate.key]?.status === "loading" ? "Finding contact info…" : "Adding…"
+                  : "+ Add as Lead"}
               </button>
             </div>
           )}
@@ -531,14 +871,14 @@ export default function HospitalsMap() {
               )}
               <hr className="my-2 border-plum/10" />
               <p><span className="text-plum/50">Contact:</span> {selectedLead.contact_person || "—"}</p>
-              <p><span className="text-plum/50">Email:</span> {selectedLead.email || "—"}</p>
-              <p><span className="text-plum/50">Phone:</span> {selectedLead.phone || "—"}</p>
-              <p>
-                <span className="text-plum/50">Website:</span>{" "}
-                {selectedLead.website
-                  ? <a href={selectedLead.website} target="_blank" rel="noreferrer" className="underline">{hostname(selectedLead.website)}</a>
-                  : "—"}
-              </p>
+              <ContactDetails
+                phone={selectedLead.phone}
+                email={selectedLead.email}
+                website={selectedLead.website}
+                lookup={contacts[`lead:${selectedLead.id}`]}
+                givenSource="lead record"
+                onRescan={() => scanLead(selectedLead, true)}
+              />
               <p className="capitalize"><span className="text-plum/50">Status:</span> {selectedLead.status.replaceAll("_", " ")}</p>
               <p className="capitalize"><span className="text-plum/50">Source:</span> {selectedLead.source.replaceAll("_", " ")}</p>
 

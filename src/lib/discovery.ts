@@ -165,6 +165,59 @@ export async function searchCdph(latitude: number, longitude: number, radiusMile
   return payload as Candidate[];
 }
 
+export type ContactSource = "given" | "google" | "openstreetmap" | "website";
+
+export interface ContactInfo {
+  website: string | null;
+  phone: string | null;
+  email: string | null;
+  emails: string[];
+  phones: string[];
+  sources: { website: ContactSource | null; phone: ContactSource | null; email: ContactSource | null };
+  scanned: boolean;
+  scanError: string | null;
+}
+
+export const CONTACT_SOURCE_LABEL: Record<ContactSource, string> = {
+  given: "facility record",
+  google: "Google Places",
+  openstreetmap: "OpenStreetMap",
+  website: "found on website",
+};
+
+// Finds a facility's website (if it has none) and scans it for email/phone.
+export async function findContactInfo(facility: {
+  name: string;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+  phone: string | null;
+  website: string | null;
+}): Promise<ContactInfo> {
+  let response: Response;
+  try {
+    response = await fetch("/api/enrich-facility", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(facility),
+    });
+  } catch {
+    throw new Error("Could not reach the contact lookup service. Check your connection and try again.");
+  }
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(
+      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : `Contact lookup returned an unexpected response (${response.status}).`
+    );
+  }
+  if (!payload || typeof payload !== "object" || !("sources" in payload)) {
+    throw new Error("Contact lookup returned an invalid response.");
+  }
+  return payload as ContactInfo;
+}
+
 export function searchGoogle(facilityId: string, radiusMiles: number): Promise<Candidate[]> {
   return searchEdgeProvider("google", { facilityId, radiusMiles });
 }
