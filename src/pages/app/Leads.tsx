@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Download } from "lucide-react";
+import { Download, Upload } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 import { leadLocationFields } from "../../lib/geo";
 import { LEAD_CATEGORIES, LEAD_STATUSES, type Facility, type Lead, type LeadCategory, type LeadStatus } from "../../lib/types";
@@ -27,6 +27,8 @@ export default function Leads() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.from("facilities").select("*").then(({ data }) => setFacilities((data as Facility[]) ?? []));
@@ -77,6 +79,38 @@ export default function Leads() {
     if (!confirm("Delete this lead?")) return;
     await supabase.from("leads").delete().eq("id", id);
     loadLeads();
+  }
+
+  // Sends the leads currently shown (respecting the status filter) to the GHL workflow.
+  async function saveLeadsToGhl() {
+    if (!confirm(`Send ${leads.length} lead${leads.length === 1 ? "" : "s"} to GoHighLevel?`)) return;
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const response = await fetch("/api/ghl-sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${data.session?.access_token ?? ""}`,
+        },
+        body: JSON.stringify({ leads }),
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        sent?: number;
+        failed?: Array<{ facility_name: string }>;
+        error?: string;
+      };
+      if (result.error) setSyncMessage(result.error);
+      else if (result.failed?.length)
+        setSyncMessage(
+          `Saved ${result.sent} to GHL; ${result.failed.length} failed: ${result.failed.map((f) => f.facility_name).join(", ")}`
+        );
+      else setSyncMessage(`Saved ${result.sent} lead${result.sent === 1 ? "" : "s"} to GHL.`);
+    } catch {
+      setSyncMessage("Couldn't reach the server to save to GHL.");
+    }
+    setSyncing(false);
   }
 
   function exportLeadsCSV() {
@@ -142,11 +176,22 @@ export default function Leads() {
             <Download className="h-4 w-4" />
             CSV Export
           </button>
+          <button
+            type="button"
+            onClick={saveLeadsToGhl}
+            disabled={loading || syncing || leads.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg border border-plum/20 px-4 py-2 text-sm font-medium text-plum transition-colors hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Upload className="h-4 w-4" />
+            {syncing ? "Saving…" : "Save to GHL"}
+          </button>
           <button className="btn-primary" onClick={() => setShowForm((s) => !s)}>
             {showForm ? "Cancel" : "Add Lead"}
           </button>
         </div>
       </div>
+
+      {syncMessage && <p className="mt-3 text-right text-sm text-plum/70">{syncMessage}</p>}
 
       {showForm && (
         <form onSubmit={handleSubmit} className="card mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
