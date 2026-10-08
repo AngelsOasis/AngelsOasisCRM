@@ -82,6 +82,23 @@ export interface Facility {
   status: "open" | "coming_soon";
 }
 
+export type BedAvailabilityStatus = "open" | "closing_soon" | "full";
+
+export interface FacilityBedAvailability {
+  facility_id: string;
+  total_beds: number;
+  occupied_beds: number;
+  shared_rooms_total: number;
+  shared_rooms_occupied: number;
+  private_rooms_total: number;
+  private_rooms_occupied: number;
+  availability_status: BedAvailabilityStatus;
+  accepting_referrals: boolean;
+  notes: string | null;
+  updated_by: string | null;
+  updated_at: string;
+}
+
 export type ApprovalStatus = "pending_approval" | "approved" | "rejected" | "needs_edit";
 export type SendStatus = "draft" | "scheduled" | "sent" | "delivered" | "opened" | "clicked" | "replied" | "failed";
 export type CampaignSendStatus = "draft" | "scheduled" | "sending" | "sent" | "failed";

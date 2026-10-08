@@ -102,3 +102,25 @@ export async function leadLocationFields(
     distance_miles: nearest ? Math.round(nearest.miles * 100) / 100 : null,
   };
 }
+
+// Full-address geocode for an Angels Oasis location (any US address).
+export async function geocodeAddress(
+  address: string
+): Promise<{ latitude: number; longitude: number; county: string | null } | null> {
+  const query = new URLSearchParams({
+    format: "jsonv2",
+    limit: "1",
+    countrycodes: "us",
+    addressdetails: "1",
+    q: address,
+  });
+  const [result] = await nominatim<GeocodingResult[]>("search", query);
+  if (!result) return null;
+
+  const latitude = Number(result.lat);
+  const longitude = Number(result.lon);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    throw new Error("Address lookup returned invalid coordinates.");
+  }
+  return { latitude, longitude, county: result.address?.county ?? result.address?.state_district ?? null };
+}

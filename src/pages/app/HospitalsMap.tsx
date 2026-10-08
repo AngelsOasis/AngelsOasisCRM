@@ -23,7 +23,13 @@ import {
   type ContactSource,
   type DiscoveryProvider,
 } from "../../lib/discovery";
-import { LEAD_CATEGORIES, type Facility, type Lead, type LeadCategory } from "../../lib/types";
+import {
+  LEAD_CATEGORIES,
+  type Facility,
+  type FacilityBedAvailability,
+  type Lead,
+  type LeadCategory,
+} from "../../lib/types";
 
 const RADII = [5, 10, 25, 50] as const;
 const MAX_RADIUS = 100;
@@ -194,6 +200,15 @@ function ContactDetails({ phone, email, website, lookup, givenSource, onRescan }
   );
 }
 
+function bedSummary(beds: FacilityBedAvailability | undefined, facility: Facility) {
+  if (!beds) return facility.status === "coming_soon" ? "Coming soon · bed counts not set" : "Bed counts not set";
+  const open = beds.total_beds - beds.occupied_beds;
+  const status = { open: "Open", closing_soon: "Closing soon", full: "Full" }[beds.availability_status];
+  return `${status} · ${open} of ${beds.total_beds} beds open · ${
+    beds.accepting_referrals ? "Accepting referrals" : "Not accepting referrals"
+  }`;
+}
+
 interface OutreachEmail {
   id: string;
   subject: string | null;
@@ -208,6 +223,7 @@ type Selection = { type: "lead"; id: string } | { type: "candidate"; key: string
 export default function HospitalsMap() {
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [bedAvailability, setBedAvailability] = useState<Record<string, FacilityBedAvailability>>({});
   const [selectedFacility, setSelectedFacility] = useState<string>("");
   const [radius, setRadius] = useState<number>(25);
   const [customRadius, setCustomRadius] = useState("");
@@ -325,13 +341,22 @@ export default function HospitalsMap() {
 
   useEffect(() => {
     async function load() {
-      const { data: facilityRows } = await supabase.from("facilities").select("*");
-      // Open facilities first so the flagship is the default selection.
+      const [{ data: facilityRows }, { data: bedRows }] = await Promise.all([
+        supabase.from("facilities").select("*"),
+        supabase.from("facility_bed_availability").select("*"),
+      ]);
+      // Open facilities first so the flagship is the default selection;
+      // locations without a map position can't be a search center.
       const allFacilities = ((facilityRows as Facility[]) ?? []).sort(
-        (a, b) => Number(a.status !== "open") - Number(b.status !== "open")
+        (a, b) =>
+          Number(a.latitude == null) - Number(b.latitude == null) ||
+          Number(a.status !== "open") - Number(b.status !== "open")
       );
       setFacilities(allFacilities);
       setSelectedFacility(allFacilities[0]?.id ?? "");
+      setBedAvailability(
+        Object.fromEntries(((bedRows as FacilityBedAvailability[]) ?? []).map((b) => [b.facility_id, b]))
+      );
     }
     load();
     loadLeads();
@@ -644,7 +669,10 @@ export default function HospitalsMap() {
           <select className="rounded-lg border border-plum/20 px-3 py-2 text-sm"
             value={selectedFacility} onChange={(e) => { setSelectedFacility(e.target.value); setSelection(null); }}>
             {facilities.map((f) => (
-              <option key={f.id} value={f.id}>{f.name}{f.status === "coming_soon" ? " (coming soon)" : ""}</option>
+              <option key={f.id} value={f.id} disabled={f.latitude == null || f.longitude == null}>
+                {f.name}{f.status === "coming_soon" ? " (coming soon)" : ""}
+                {f.latitude == null || f.longitude == null ? " (no map location)" : ""}
+              </option>
             ))}
           </select>
           <div className="flex overflow-hidden rounded-lg border border-plum/20">
@@ -773,10 +801,6 @@ export default function HospitalsMap() {
             <FitToRadius center={center} radiusMiles={radius} />
             <Circle center={center} radius={radius * 1609.34}
               pathOptions={{ color: "#4A1D3D", fillOpacity: 0.05 }} />
-            <CircleMarker center={center} radius={9}
-              pathOptions={{ color: "#fff", weight: 3, fillColor: "#4A1D3D", fillOpacity: 1 }}>
-              <Tooltip>{facilities.find((f) => f.id === selectedFacility)?.name ?? "Angels Oasis"}</Tooltip>
-            </CircleMarker>
             {shownCandidates.map((c) => (
               <CircleMarker
                 key={c.key}
@@ -811,6 +835,32 @@ export default function HospitalsMap() {
                 <Tooltip>{lead.facility_name} (lead)</Tooltip>
               </CircleMarker>
             ))}
+            {/* Every Angels Oasis location; click another one to search around it. */}
+            {facilities.map((f) => {
+              if (f.latitude == null || f.longitude == null) return null;
+              const isSelected = f.id === selectedFacility;
+              return (
+                <CircleMarker
+                  key={`facility:${f.id}`}
+                  center={[f.latitude, f.longitude]}
+                  radius={isSelected ? 10 : 7}
+                  pathOptions={{
+                    color: "#fff",
+                    weight: 3,
+                    fillColor: isSelected ? "#4A1D3D" : "#6B2C56",
+                    fillOpacity: isSelected ? 1 : 0.85,
+                  }}
+                  eventHandlers={{ click: () => { if (!isSelected) { setSelectedFacility(f.id); setSelection(null); } } }}
+                >
+                  <Tooltip>
+                    <strong>{f.name}</strong>
+                    <br />
+                    {bedSummary(bedAvailability[f.id], f)}
+                    {!isSelected && <><br /><em>Click to search around this location</em></>}
+                  </Tooltip>
+                </CircleMarker>
+              );
+            })}
           </MapContainer>
         </div>
 
