@@ -139,8 +139,30 @@ async function searchEdgeProvider(
   return data as Candidate[];
 }
 
-export function searchCdph(latitude: number, longitude: number, radiusMiles: number): Promise<Candidate[]> {
-  return searchEdgeProvider("cdph", { latitude, longitude, radiusMiles });
+export async function searchCdph(latitude: number, longitude: number, radiusMiles: number): Promise<Candidate[]> {
+  let response: Response;
+  try {
+    response = await fetch("/api/facility-discovery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ latitude, longitude, radiusMiles }),
+    });
+  } catch {
+    throw new Error("Could not reach the California licensed-facility search service. Check your connection and try Refresh.");
+  }
+
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : `California licensed-facility search returned an unexpected response (${response.status}).`;
+    throw new Error(message);
+  }
+  if (!Array.isArray(payload)) {
+    throw new Error("California licensed-facility search returned an invalid response.");
+  }
+  return payload as Candidate[];
 }
 
 export function searchGoogle(facilityId: string, radiusMiles: number): Promise<Candidate[]> {

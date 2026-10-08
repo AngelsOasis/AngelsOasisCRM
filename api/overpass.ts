@@ -24,8 +24,9 @@ interface OverpassPayload {
 const ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
 ];
-const UPSTREAM_TIMEOUT_MS = 6_000;
+const UPSTREAM_TIMEOUT_MS = 8_000;
 
 function isValidCoordinates(latitude: unknown, longitude: unknown): latitude is number {
   return (
@@ -93,7 +94,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
 
   const radiusMeters = Math.round(radiusMiles * 1609.34);
   const around = `around:${radiusMeters},${latitude},${longitude}`;
-  const query = `[out:json][timeout:5];(nwr(${around})["amenity"~"hospital|clinic|doctors|nursing_home"];nwr(${around})["healthcare"~"hospital|clinic|doctor|nursing_home|rehabilitation|hospice|home_health"];);out center tags;`;
+  const query = `[out:json][timeout:7];(nwr(${around})["amenity"~"hospital|clinic|doctors|nursing_home|rehabilitation|hospice"]["name"];nwr(${around})["healthcare"~"hospital|clinic|doctor|nursing_home|rehabilitation|hospice|home_health|physiotherapist"]["name"];);out center tags;`;
   const controllers = ENDPOINTS.map(() => new AbortController());
   const errors: string[] = [];
   const requests = ENDPOINTS.map((endpoint, index) =>
