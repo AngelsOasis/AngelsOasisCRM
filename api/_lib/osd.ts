@@ -1,4 +1,4 @@
-// Shared OSINT helpers: web search (Tavily first, Brave as a fallback) plus the
+// Shared OSD (Open Source Data) helpers: Tavily web search plus the
 // parsing used to turn search results and facility web pages into websites,
 // contacts, and named people.
 // Files under api/_lib are not exposed as routes by Vercel.
@@ -22,96 +22,22 @@ export interface Person {
 }
 
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
-const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const SEARCH_TIMEOUT_MS = 8_000;
-const BRAVE_GAP_MS = 1_100; // Brave's entry plans allow about 1 query/second
-
-let braveQueue: Promise<unknown> = Promise.resolve();
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function tavilyKey() {
   return (process.env.TAVILY_API_KEY ?? process.env.TAVILY_KEY)?.trim() || null;
 }
 
-export function braveKey() {
-  return process.env.BRAVE_SEARCH_API_KEY?.trim() || null;
-}
-
 export function webSearchConfigured() {
-  return tavilyKey() != null || braveKey() != null;
+  return tavilyKey() != null;
 }
 
-export const OSINT_NOT_CONFIGURED =
-  "Web search (OSINT) isn't set up yet. Add a TAVILY_API_KEY (or BRAVE_SEARCH_API_KEY) environment variable in Vercel and redeploy.";
-
-function stripTags(text: string) {
-  return text.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"');
-}
-
-// Runs one Brave web search. Calls are spaced out so a batch of lookups stays
-// within the plan's rate limit.
-export function braveSearch(query: string, count = 10): Promise<SearchResult[]> {
-  const key = braveKey();
-  if (!key) return Promise.reject(new Error(OSINT_NOT_CONFIGURED));
-
-  const run = async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
-    try {
-      const url = `${BRAVE_ENDPOINT}?${new URLSearchParams({
-        q: query,
-        count: String(Math.min(count, 20)),
-        country: "us",
-        search_lang: "en",
-        extra_snippets: "true",
-        safesearch: "moderate",
-      })}`;
-      const response = await fetch(url, {
-        headers: { Accept: "application/json", "X-Subscription-Token": key },
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        // Brave reports errors as { error: { code, detail } }; an invalid key is a 422.
-        const body = (await response.json().catch(() => null)) as { error?: { code?: string; detail?: string } } | null;
-        const code = body?.error?.code ?? "";
-        if (/TOKEN|AUTH|SUBSCRIPTION/i.test(code) || response.status === 401 || response.status === 403) {
-          throw new Error("Brave Search rejected the API key — check BRAVE_SEARCH_API_KEY in Vercel");
-        }
-        if (response.status === 429 || /RATE_LIMIT|QUOTA/i.test(code)) {
-          throw new Error("Brave Search rate limit or monthly quota reached");
-        }
-        throw new Error(`Brave Search returned ${response.status}${body?.error?.detail ? `: ${body.error.detail}` : ""}`);
-      }
-      const payload = (await response.json()) as {
-        web?: { results?: { title?: string; url?: string; description?: string; extra_snippets?: string[] }[] };
-      };
-      return (payload.web?.results ?? []).flatMap((result) =>
-        result.url
-          ? [{
-              title: stripTags(result.title ?? ""),
-              url: result.url,
-              description: stripTags(result.description ?? ""),
-              extraSnippets: (result.extra_snippets ?? []).map(stripTags),
-            }]
-          : []
-      );
-    } catch (error) {
-      if (controller.signal.aborted) throw new Error("Brave Search timed out");
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-
-  const turn = braveQueue.then(run, run);
-  braveQueue = turn.then(() => sleep(BRAVE_GAP_MS), () => sleep(BRAVE_GAP_MS));
-  return turn;
-}
+export const OSD_NOT_CONFIGURED =
+  "Open Source Data (OSD) isn't set up yet. Add a TAVILY_API_KEY environment variable in Vercel and redeploy.";
 
 async function tavilySearch(query: string, count: number, domain?: string): Promise<SearchResult[]> {
   const key = tavilyKey();
-  if (!key) throw new Error(OSINT_NOT_CONFIGURED);
+  if (!key) throw new Error(OSD_NOT_CONFIGURED);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS * 2);
   try {
@@ -151,28 +77,10 @@ async function tavilySearch(query: string, count: number, domain?: string): Prom
   }
 }
 
-// Web search used by every OSINT feature. Write queries in plain words (no
-// OR/site: operators); `domain` limits results to one site, e.g. linkedin.com.
-// Tavily runs first; Brave is tried if Tavily isn't set up or fails.
-export async function webSearch(query: string, options: { count?: number; domain?: string } = {}) {
-  const count = options.count ?? 10;
-  let lastError: unknown = new Error(OSINT_NOT_CONFIGURED);
-  if (tavilyKey()) {
-    try {
-      return await tavilySearch(query, count, options.domain);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  if (braveKey()) {
-    try {
-      return await braveSearch(options.domain ? `site:${options.domain} ${query}` : query, count);
-    } catch (error) {
-      // Report Tavily's problem if both failed, since it's the primary.
-      if (!tavilyKey()) lastError = error;
-    }
-  }
-  throw lastError;
+// Web search (Tavily) used by every OSD feature. Write queries in plain words
+// (no OR/site: operators); `domain` limits results to one site, e.g. linkedin.com.
+export function webSearch(query: string, options: { count?: number; domain?: string } = {}) {
+  return tavilySearch(query, options.count ?? 10, options.domain);
 }
 
 export function hostOf(url: string) {

@@ -15,7 +15,7 @@ import {
   getIntegrationStatus,
   searchCdph,
   searchGoogle,
-  searchOsint,
+  searchOsd,
   searchOverpass,
   mergeCandidates,
   CONTACT_SOURCE_LABEL,
@@ -443,8 +443,8 @@ export default function HospitalsMap() {
           results = await searchGoogle(selectedFacility, radius);
         } else if (provider === "osm") {
           results = await searchOverpass(center[0], center[1], radius);
-        } else if (provider === "osint") {
-          const found = await searchOsint(center[0], center[1], radius);
+        } else if (provider === "osd") {
+          const found = await searchOsd(center[0], center[1], radius);
           results = found.candidates;
           notice = found.notes.length ? found.notes.join(" ") : null;
         } else if (provider === "cdph") {
@@ -456,14 +456,14 @@ export default function HospitalsMap() {
           }
         } else {
           // All sources: show CDPH as soon as it's back, then merge in
-          // OpenStreetMap and web search as each finishes. CDPH is passed
+          // OpenStreetMap and OSD as each finishes. CDPH is passed
           // first so its official record wins when the same facility repeats.
-          const parts: Partial<Record<"cdph" | "osm" | "osint", Candidate[]>> = {};
+          const parts: Partial<Record<"cdph" | "osm" | "osd", Candidate[]>> = {};
           const failures: string[] = [];
           const publish = () => {
-            if (!cancelled) setCandidates(mergeCandidates([parts.cdph ?? [], parts.osm ?? [], parts.osint ?? []]));
+            if (!cancelled) setCandidates(mergeCandidates([parts.cdph ?? [], parts.osm ?? [], parts.osd ?? []]));
           };
-          const run = (source: "cdph" | "osm" | "osint", search: () => Promise<Candidate[]>) =>
+          const run = (source: "cdph" | "osm" | "osd", search: () => Promise<Candidate[]>) =>
             search().then(
               (found) => { parts[source] = found; publish(); },
               (err: unknown) => {
@@ -473,10 +473,10 @@ export default function HospitalsMap() {
           await Promise.all([
             run("cdph", () => searchCdph(center[0], center[1], radius)),
             run("osm", () => searchOverpass(center[0], center[1], radius)),
-            run("osint", () => searchOsint(center[0], center[1], radius).then((found) => found.candidates)),
+            run("osd", () => searchOsd(center[0], center[1], radius).then((found) => found.candidates)),
           ]);
           if (failures.length === 3) throw new Error(`Every source failed. ${failures.join(" · ")}`);
-          results = mergeCandidates([parts.cdph ?? [], parts.osm ?? [], parts.osint ?? []]);
+          results = mergeCandidates([parts.cdph ?? [], parts.osm ?? [], parts.osd ?? []]);
           notice = failures.length ? `Some sources were skipped — ${failures.join(" · ")}` : null;
         }
         searchCache.current.set(cacheKey, { radius, candidates: results, notice });
@@ -791,10 +791,10 @@ export default function HospitalsMap() {
         <span className="ml-auto flex items-center gap-2">
           <select className="rounded-lg border border-plum/20 px-2 py-1 text-sm"
             value={provider} onChange={(e) => setProvider(e.target.value as SearchMode)}>
-            <option value="all">All sources combined (CDPH, OSM, OSINT)</option>
+            <option value="all">All sources combined (CDPH, OSM, OSD)</option>
             <option value="cdph">California licensed facilities — free (CDPH)</option>
             <option value="osm">OpenStreetMap — free, slower (OSM)</option>
-            <option value="osint">Web search — Tavily (OSINT)</option>
+            <option value="osd">Open Source Data — Tavily (OSD)</option>
             <option value="google" disabled={!googleAvailable}>
               Google Places{googleAvailable ? "" : " — add key in Settings"}
             </option>
@@ -851,7 +851,7 @@ export default function HospitalsMap() {
             Searching {SEARCH_MODE_LABEL[provider]} within {radius} mi…
             {provider === "all" && newCandidates.length > 0 && ` ${newCandidates.length} found so far, still checking other sources.`}
             {provider === "osm" && " (public OpenStreetMap servers can take a minute or more)"}
-            {(provider === "osint" || provider === "all") && " Web search can take up to a minute."}
+            {(provider === "osd" || provider === "all") && " OSD can take up to a minute."}
           </p>
         )}
         {!searching && searchError && <p className="text-red-600">{searchError}</p>}

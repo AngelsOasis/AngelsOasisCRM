@@ -17,7 +17,7 @@ import {
   peopleFromText,
   pickWebsite,
   type Person,
-} from "./_lib/osint.js";
+} from "./_lib/osd.js";
 
 declare const process: {
   env: Record<string, string | undefined>;
@@ -35,7 +35,7 @@ interface Enrichment {
   scanned: boolean;
   scanError: string | null;
   people: Person[];
-  // Whether the web search (OSINT) step ran, and why not if it didn't.
+  // Whether the Open Source Data (OSD) step ran, and why not if it didn't.
   webSearch: { ran: boolean; note: string | null };
 }
 
@@ -361,7 +361,7 @@ async function scanWebsite(website: string) {
   });
 }
 
-// Web search (OSINT, Tavily or Brave): find the facility's own site when no directory had
+// Open Source Data (OSD, Tavily web search): find the facility's own site when no directory had
 // one, pick up contacts quoted in search snippets from that site, and find
 // referral-relevant staff from LinkedIn search results (never LinkedIn pages).
 async function searchWeb(facility: FacilityInput, result: Enrichment) {
@@ -462,7 +462,7 @@ async function enrich(facility: FacilityInput): Promise<Enrichment> {
     searchedEarly = true;
     await searchWeb(facility, result).then(
       () => { result.webSearch.ran = true; },
-      (error: unknown) => { result.webSearch.note = error instanceof Error ? error.message : "Web search failed."; }
+      (error: unknown) => { result.webSearch.note = error instanceof Error ? error.message : "OSD search failed."; }
     );
   }
 
@@ -491,10 +491,10 @@ async function enrich(facility: FacilityInput): Promise<Enrichment> {
   if (searchEnabled && !searchedEarly) {
     await searchWeb(facility, result).then(
       () => { result.webSearch.ran = true; },
-      (error: unknown) => { result.webSearch.note = error instanceof Error ? error.message : "Web search failed."; }
+      (error: unknown) => { result.webSearch.note = error instanceof Error ? error.message : "OSD search failed."; }
     );
   } else if (!searchEnabled) {
-    result.webSearch.note = "Web search (OSINT) isn't set up — add TAVILY_API_KEY in Vercel to also search the web.";
+    result.webSearch.note = "Open Source Data (OSD) isn't set up — add TAVILY_API_KEY in Vercel to also search the web.";
   }
   return result;
 }

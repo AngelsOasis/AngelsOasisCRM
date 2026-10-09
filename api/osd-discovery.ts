@@ -3,9 +3,9 @@ import {
   webSearchConfigured,
   hostOf,
   isDirectoryHost,
-  OSINT_NOT_CONFIGURED,
+  OSD_NOT_CONFIGURED,
   type SearchResult,
-} from "./_lib/osint.js";
+} from "./_lib/osd.js";
 
 interface ApiRequest {
   method?: string;
@@ -31,7 +31,7 @@ interface Candidate {
   website: string | null;
   category: Category;
   detail: string | null;
-  provider: "osint";
+  provider: "osd";
 }
 
 // Five searches plus rate-limited geocoding can take ~40 seconds.
@@ -46,11 +46,11 @@ const CACHE_LIMIT = 50;
 
 // One web search per facility type; results are listings for the area.
 const SEARCHES: { category: Category; query: string; detail: string }[] = [
-  { category: "hospital", query: "hospital", detail: "Hospital (web search)" },
-  { category: "skilled_nursing_facility", query: "skilled nursing facility", detail: "Skilled nursing (web search)" },
-  { category: "rehab_center", query: "rehabilitation center", detail: "Rehab center (web search)" },
-  { category: "healthcare_organization", query: "hospice", detail: "Hospice (web search)" },
-  { category: "healthcare_organization", query: "home health agency", detail: "Home health (web search)" },
+  { category: "hospital", query: "hospital", detail: "Hospital (OSD)" },
+  { category: "skilled_nursing_facility", query: "skilled nursing facility", detail: "Skilled nursing (OSD)" },
+  { category: "rehab_center", query: "rehabilitation center", detail: "Rehab center (OSD)" },
+  { category: "healthcare_organization", query: "hospice", detail: "Hospice (OSD)" },
+  { category: "healthcare_organization", query: "home health agency", detail: "Home health (OSD)" },
 ];
 
 const cache = new Map<string, { loadedAt: number; candidates: Candidate[] }>();
@@ -189,7 +189,7 @@ async function discover(latitude: number, longitude: number, radiusMiles: number
   const leads: Lead[] = [];
   let succeeded = 0;
   let firstError: Error | null = null;
-  // The five searches run in parallel (Brave, if used, queues them itself).
+  // The five searches run in parallel.
   const outcomes = await Promise.allSettled(
     SEARCHES.map((search) => webSearch(`${search.query} ${area}`, { count: 20 }))
   );
@@ -234,7 +234,7 @@ async function discover(latitude: number, longitude: number, radiusMiles: number
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
     if (milesBetween(latitude, longitude, lat, lon) > radiusMiles) continue;
     candidates.push({
-      key: `osint:${normalizedAddress(lead.address).replace(/ /g, "-")}`,
+      key: `osd:${normalizedAddress(lead.address).replace(/ /g, "-")}`,
       name: lead.name,
       address: lead.address,
       county: hit?.address?.county ?? null,
@@ -244,7 +244,7 @@ async function discover(latitude: number, longitude: number, radiusMiles: number
       website: lead.website,
       category: lead.category,
       detail: lead.detail,
-      provider: "osint",
+      provider: "osd",
     });
   }
   return { candidates, notes };
@@ -256,7 +256,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     return;
   }
   if (!webSearchConfigured()) {
-    respond(response, 503, { error: OSINT_NOT_CONFIGURED });
+    respond(response, 503, { error: OSD_NOT_CONFIGURED });
     return;
   }
 
@@ -284,9 +284,9 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     cache.set(cacheKey, { loadedAt: Date.now(), candidates });
     respond(response, 200, { candidates, notes });
   } catch (error) {
-    console.error("OSINT discovery failed:", error);
+    console.error("OSD discovery failed:", error);
     respond(response, 502, {
-      error: `Web search (OSINT) failed: ${error instanceof Error ? error.message : "unexpected error"}.`,
+      error: `Open Source Data (OSD) failed: ${error instanceof Error ? error.message : "unexpected error"}.`,
     });
   }
 }

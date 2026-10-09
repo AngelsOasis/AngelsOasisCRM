@@ -4,7 +4,7 @@ import { supabase } from "./supabaseClient";
 import { milesBetween } from "./geo";
 import type { Lead, LeadCategory } from "./types";
 
-export type DiscoveryProvider = "cdph" | "osm" | "osint" | "google";
+export type DiscoveryProvider = "cdph" | "osm" | "osd" | "google";
 // What the map's source dropdown can pick: one provider, or several combined.
 export type SearchMode = DiscoveryProvider | "all";
 
@@ -32,7 +32,7 @@ export interface IntegrationStatus {
 export const PROVIDER_LABEL: Record<DiscoveryProvider, string> = {
   cdph: "California licensed facilities",
   osm: "OpenStreetMap",
-  osint: "Web search (OSINT)",
+  osd: "Open Source Data (OSD)",
   google: "Google Places",
 };
 
@@ -203,7 +203,7 @@ export const CONTACT_SOURCE_LABEL: Record<ContactSource, string> = {
   google: "Google Places",
   openstreetmap: "OpenStreetMap",
   website: "found on website",
-  web_search: "found by web search",
+  web_search: "found by Open Source Data (OSD)",
 };
 
 // Finds a facility's website (if it has none) and scans it for email/phone.
@@ -239,32 +239,32 @@ export async function findContactInfo(facility: {
   return payload as ContactInfo;
 }
 
-// Web search (OSINT): finds facilities listed online near the map location.
-export async function searchOsint(
+// Open Source Data (OSD): finds facilities listed online near the map location.
+export async function searchOsd(
   latitude: number,
   longitude: number,
   radiusMiles: number
 ): Promise<{ candidates: Candidate[]; notes: string[] }> {
   let response: Response;
   try {
-    response = await fetch("/api/osint-discovery", {
+    response = await fetch("/api/osd-discovery", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ latitude, longitude, radiusMiles }),
     });
   } catch {
-    throw new Error("Could not reach the web search (OSINT) service. Check your connection and try Refresh.");
+    throw new Error("Could not reach the Open Source Data (OSD) service. Check your connection and try Refresh.");
   }
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(
       payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
         ? payload.error
-        : `Web search (OSINT) returned an unexpected response (${response.status}).`
+        : `Open Source Data (OSD) returned an unexpected response (${response.status}).`
     );
   }
   if (!payload || typeof payload !== "object" || !("candidates" in payload) || !Array.isArray(payload.candidates)) {
-    throw new Error("Web search (OSINT) returned an invalid response.");
+    throw new Error("Open Source Data (OSD) returned an invalid response.");
   }
   const notes = "notes" in payload && Array.isArray(payload.notes) ? (payload.notes as string[]) : [];
   return { candidates: payload.candidates as Candidate[], notes };
@@ -357,4 +357,4 @@ export function findMatchingLead(candidate: Candidate, leads: Lead[]): Lead | un
     (lead.place_id != null && lead.place_id === candidate.key) ||
     lead.facility_name.trim().toLowerCase() === candidate.name.trim().toLowerCase()
   );
-}
+}
