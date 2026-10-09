@@ -158,15 +158,38 @@ function SendingSettings({ isAdmin }: { isAdmin: boolean }) {
 function GhlSettings() {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [url, setUrl] = useState("");
+  const [draftUrl, setDraftUrl] = useState("");
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"save" | "test" | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const [message, setMessage] = useState<{ text: string; isError?: boolean } | null>(null);
 
   useEffect(() => {
     (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      const { data: profile } = await supabase.from("profiles").select("role").eq("id", auth.user?.id ?? "").maybeSingle();
+      const { data: auth, error: authError } = await supabase.auth.getUser();
+      if (authError) {
+        setLoadError(authError.message);
+        setIsAdmin(false);
+        return;
+      }
+      if (!auth.user) {
+        setLoadError("Sign in to view GHL settings.");
+        setIsAdmin(false);
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", auth.user.id)
+        .maybeSingle();
+      if (profileError) {
+        setLoadError(profileError.message);
+        setIsAdmin(false);
+        return;
+      }
+
       const admin = profile?.role === "admin";
       setIsAdmin(admin);
       if (admin) {
@@ -184,21 +207,56 @@ function GhlSettings() {
     })();
   }, []);
 
-  async function save(newUrl: string) {
+  useEffect(() => {
+    if (!isEditOpen) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && busy === null) setIsEditOpen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isEditOpen, busy]);
+
+  function openEditor() {
+    setDraftUrl(url);
+    setMessage(null);
+    setIsEditOpen(true);
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    const newUrl = draftUrl.trim();
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(newUrl);
+    } catch {
+      setMessage({ text: "Enter a valid HTTPS webhook URL.", isError: true });
+      return;
+    }
+    if (parsedUrl.protocol !== "https:") {
+      setMessage({ text: "The webhook URL must use HTTPS.", isError: true });
+      return;
+    }
+
     setBusy("save");
     setMessage(null);
-    const { data: auth } = await supabase.auth.getUser();
+    const { data: auth, error: authError } = await supabase.auth.getUser();
+    if (authError || !auth.user) {
+      setBusy(null);
+      setMessage({ text: authError?.message ?? "Sign in again before changing the webhook URL.", isError: true });
+      return;
+    }
     const { error } = await supabase
       .from("ghl_settings")
-      .upsert({ id: true, inbound_webhook_url: newUrl || null, updated_by: auth.user?.id ?? null });
+      .upsert({ id: true, inbound_webhook_url: newUrl, updated_by: auth.user.id });
     setBusy(null);
     if (error) {
       setMessage({ text: error.message, isError: true });
       return;
     }
     setUrl(newUrl);
-    setConfigured(Boolean(newUrl));
-    setMessage({ text: newUrl ? "Webhook URL saved." : "Webhook URL removed." });
+    setConfigured(true);
+    setIsEditOpen(false);
+    setMessage({ text: "GHL webhook link saved." });
   }
 
   async function sendTest() {
@@ -237,41 +295,79 @@ function GhlSettings() {
         Status: {configured ? <span className="font-medium text-plum">Connected</span> : <span className="text-plum/50">not set</span>}
       </p>
       {isAdmin ? (
-        <form
-          className="space-y-2"
-          onSubmit={(e: FormEvent) => { e.preventDefault(); save(url.trim()); }}
-        >
-          <label className="block text-sm">
-            <span className="font-medium text-plum-dark">Inbound Webhook URL</span>
-            <input
-              type="url" autoComplete="off" pattern="https://.*"
-              placeholder="https://services.leadconnectorhq.com/hooks/…/webhook-trigger/…"
-              className="mt-1 w-full rounded-lg border border-plum/20 px-3 py-1.5 font-mono text-xs"
-              value={url} onChange={(e) => setUrl(e.target.value)}
-            />
-            <span className="mt-0.5 block text-xs text-plum/50">
-              In GHL: Automation → Workflows → trigger "Inbound Webhook" → copy its URL. Paste a different account's URL to switch.
-            </span>
-          </label>
+        <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <button type="submit" className="btn-primary !px-4 !py-1.5 text-sm" disabled={busy !== null || !url.trim()}>
-              {busy === "save" ? "Saving…" : "Save"}
+            <button
+              type="button"
+              className="btn-secondary !px-4 !py-2 text-sm"
+              onClick={openEditor}
+            >
+              {configured ? "Edit" : "Add webhook"}
             </button>
             <button
-              type="button" disabled={busy !== null || !configured}
-              className="rounded-lg border border-plum/20 px-4 py-1.5 text-sm font-medium text-plum hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
+              type="button"
+              disabled={busy !== null || !configured}
+              className="rounded-full border border-plum/20 px-4 py-2 text-sm font-medium text-plum hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={sendTest}
             >
               {busy === "test" ? "Sending…" : "Send test lead"}
             </button>
-            {configured && (
-              <button type="button" className="text-xs text-red-500 hover:underline" disabled={busy !== null}
-                onClick={() => confirm("Disconnect GHL? Save to GHL will stop working until a new URL is saved.") && save("")}>
-                Remove
-              </button>
-            )}
           </div>
-        </form>
+          {isEditOpen && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget && busy === null) setIsEditOpen(false);
+              }}
+            >
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="ghl-webhook-dialog-title"
+                className="w-full max-w-lg rounded-[10px] border border-hairline bg-white p-6 shadow-xl sm:p-8"
+              >
+                <h3 id="ghl-webhook-dialog-title" className="font-serif text-xl text-plum-dark">
+                  Edit GHL Webhook Link
+                </h3>
+                <p className="mt-2 text-sm text-plum/60">
+                  Paste the Inbound Webhook URL from the GHL workflow you want to use.
+                </p>
+                <form onSubmit={save} className="mt-5 space-y-4">
+                  <label className="block text-sm">
+                    <span className="font-medium text-plum-dark">GHL Webhook Link</span>
+                    <input
+                      type="url"
+                      required
+                      autoComplete="url"
+                      inputMode="url"
+                      placeholder="https://services.leadconnectorhq.com/hooks/…"
+                      className="mt-1 w-full px-3 py-2 font-mono text-xs"
+                      value={draftUrl}
+                      onChange={(event) => setDraftUrl(event.target.value)}
+                    />
+                    <span className="mt-1 block text-xs text-plum/50">
+                      The link must use HTTPS. Only admins can change this connection.
+                    </span>
+                  </label>
+                  {message?.isError && <p role="alert" className="text-sm text-red-600">{message.text}</p>}
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      className="rounded-full border border-plum/20 px-4 py-2 text-sm font-medium text-plum hover:bg-plum/5 disabled:opacity-50"
+                      disabled={busy !== null}
+                      onClick={() => setIsEditOpen(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button type="submit" className="btn-primary !px-5 !py-2 text-sm" disabled={busy !== null}>
+                      {busy === "save" ? "Saving…" : "Save changes"}
+                    </button>
+                  </div>
+                </form>
+              </section>
+            </div>
+          )}
+        </div>
       ) : (
         <p className="text-xs text-plum/50">Only admins can change the GHL connection.</p>
       )}
