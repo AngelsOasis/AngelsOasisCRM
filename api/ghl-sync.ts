@@ -15,8 +15,8 @@ declare const process: {
 };
 
 // Posts leads to a GoHighLevel workflow's "Inbound Webhook" trigger, one
-// request per lead. The webhook URL is saved by an admin on the Settings page
-// (ghl_settings table, migration 0007) and read here with the caller's
+// request per lead. The webhook URL is saved by any signed-in user on the Settings page
+// (ghl_settings table, migrations 0007–0008) and read here with the caller's
 // session, so it never has to be shipped to the browser. The old
 // GHL_INBOUND_WEBHOOK_URL server env var still works as a fallback.
 export const config = { maxDuration: 60 };
@@ -93,7 +93,7 @@ async function resolveWebhookUrl(request: ApiRequest): Promise<WebhookLookup> {
       status: 400,
       error: rpc && !rpc.ok && rpc.status !== 404
         ? "You don't have permission to save leads to GHL."
-        : "No GHL webhook URL is set. An admin can add it in Settings → GoHighLevel.",
+        : "No GHL webhook URL is set. Add it in Settings → GoHighLevel.",
     };
   }
   return { url };

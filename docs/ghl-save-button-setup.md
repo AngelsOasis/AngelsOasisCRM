@@ -9,14 +9,14 @@ just means pasting a new URL. You don't need to edit `.env` files or redeploy.
 How the data flows:
 
 ```
-Settings → GoHighLevel (admin pastes URL) ──▶ Supabase table ghl_settings
+Settings → GoHighLevel (paste URL) ────────▶ Supabase table ghl_settings
                                                      │ read by the server with the user's login
 Leads page ──"Save to GHL"──▶ /api/ghl-sync (Vercel) ┴──POST per lead──▶ GHL Inbound Webhook ──▶ Workflow: Create/Update Contact
 ```
 
-- The URL is stored in Supabase. Row-level security lets **only admins** read or change it.
-- Staff click **Save to GHL**, and the **server** fetches the URL through the `ghl_inbound_webhook_url()` database
-  function. Read-only viewers can't use it.
+- The URL is stored in Supabase. **Anyone signed in** can view or change it (no role restrictions).
+- Users click **Save to GHL**, and the **server** fetches the URL through the `ghl_inbound_webhook_url()` database
+  function.
 - It sends the leads **currently shown** on the page, so the status filter applies.
 - GHL matches on email or phone, so clicking it again updates existing contacts instead of creating duplicates.
 - Fallback: if no URL is saved in Settings, the server uses the `GHL_INBOUND_WEBHOOK_URL` environment variable when it is set.
@@ -25,12 +25,10 @@ Leads page ──"Save to GHL"──▶ /api/ghl-sync (Vercel) ┴──POST per
 
 ## Part A: Code changes
 
-### Step 1. Database migration: `supabase/migrations/0007_ghl_settings.sql`
+### Step 1. Database migrations (run both, in order)
 
-This creates the single-row `ghl_settings` table, its admin-only access rules, and two functions:
-
-- `ghl_webhook_configured()`: lets non-admins see whether GHL is connected.
-- `ghl_inbound_webhook_url()`: gives the URL to the server route.
+**1a. `supabase/migrations/0007_ghl_settings.sql`.** This creates the single-row `ghl_settings` table and the
+`ghl_inbound_webhook_url()` function the server route calls. Its first version was admin-only:
 
 ```sql
 -- ---------------------------------------------------------------------------
@@ -98,8 +96,46 @@ grant execute on function ghl_webhook_configured() to authenticated;
 grant execute on function ghl_inbound_webhook_url() to authenticated;
 ```
 
-Run it in the Supabase SQL editor, or with `supabase db push`. It depends on `profiles` and `set_updated_at()`
-from `0001_init.sql`.
+**1b. `supabase/migrations/0008_ghl_settings_open_access.sql`.** This removes the role restrictions, so any signed-in
+user can read or change the URL and use Save to GHL:
+
+```sql
+-- ---------------------------------------------------------------------------
+-- GoHighLevel connection — drop the role restrictions from 0007. Anyone signed
+-- in can view and change the Inbound Webhook URL in Settings → GoHighLevel and
+-- use the Leads page's "Save to GHL" button.
+-- ---------------------------------------------------------------------------
+drop policy if exists "admins read ghl settings" on ghl_settings;
+drop policy if exists "admins insert ghl settings" on ghl_settings;
+drop policy if exists "admins update ghl settings" on ghl_settings;
+
+drop policy if exists "authenticated read ghl settings" on ghl_settings;
+create policy "authenticated read ghl settings" on ghl_settings
+  for select using (auth.role() = 'authenticated');
+
+drop policy if exists "authenticated insert ghl settings" on ghl_settings;
+create policy "authenticated insert ghl settings" on ghl_settings
+  for insert with check (auth.role() = 'authenticated');
+
+drop policy if exists "authenticated update ghl settings" on ghl_settings;
+create policy "authenticated update ghl settings" on ghl_settings
+  for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- Same function api/ghl-sync.ts calls, now for every signed-in user.
+create or replace function ghl_inbound_webhook_url()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select inbound_webhook_url from ghl_settings where auth.uid() is not null;
+$$;
+```
+
+Run them in the Supabase SQL editor, or with `supabase db push`. They depend on `profiles` and `set_updated_at()`
+from `0001_init.sql`. If you're setting this up fresh, you can merge them into one file by writing 0007 with the
+0008 policies and function directly.
 
 ### Step 2. Server route: `api/ghl-sync.ts`
 
@@ -129,8 +165,8 @@ declare const process: {
 };
 
 // Posts leads to a GoHighLevel workflow's "Inbound Webhook" trigger, one
-// request per lead. The webhook URL is saved by an admin on the Settings page
-// (ghl_settings table, migration 0007) and read here with the caller's
+// request per lead. The webhook URL is saved by any signed-in user on the Settings page
+// (ghl_settings table, migrations 0007–0008) and read here with the caller's
 // session, so it never has to be shipped to the browser. The old
 // GHL_INBOUND_WEBHOOK_URL server env var still works as a fallback.
 export const config = { maxDuration: 60 };
@@ -207,7 +243,7 @@ async function resolveWebhookUrl(request: ApiRequest): Promise<WebhookLookup> {
       status: 400,
       error: rpc && !rpc.ok && rpc.status !== 404
         ? "You don't have permission to save leads to GHL."
-        : "No GHL webhook URL is set. An admin can add it in Settings → GoHighLevel.",
+        : "No GHL webhook URL is set. Add it in Settings → GoHighLevel.",
     };
   }
   return { url };
@@ -294,51 +330,87 @@ export default async function handler(request: ApiRequest, response: ApiResponse
 
 ```tsx
 // The GoHighLevel Inbound Webhook URL used by the Leads page's "Save to GHL"
-// button. Stored in the ghl_settings table (admins only); api/ghl-sync.ts reads it.
+// button. Stored in the ghl_settings table (any signed-in user); api/ghl-sync.ts reads it.
 function GhlSettings() {
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [url, setUrl] = useState("");
+  const [draftUrl, setDraftUrl] = useState("");
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"save" | "test" | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const [message, setMessage] = useState<{ text: string; isError?: boolean } | null>(null);
 
   useEffect(() => {
     (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      const { data: profile } = await supabase.from("profiles").select("role").eq("id", auth.user?.id ?? "").maybeSingle();
-      const admin = profile?.role === "admin";
-      setIsAdmin(admin);
-      if (admin) {
-        const { data, error } = await supabase.from("ghl_settings").select("inbound_webhook_url").maybeSingle();
-        if (error) setLoadError(error.message);
-        else {
-          setUrl(data?.inbound_webhook_url ?? "");
-          setConfigured(Boolean(data?.inbound_webhook_url));
-        }
-      } else {
-        const { data, error } = await supabase.rpc("ghl_webhook_configured");
-        if (error) setLoadError(error.message);
-        else setConfigured(Boolean(data));
+      const { data: auth, error: authError } = await supabase.auth.getUser();
+      if (authError) {
+        setLoadError(authError.message);
+        return;
+      }
+      if (!auth.user) {
+        setLoadError("Sign in to view GHL settings.");
+        return;
+      }
+
+      const { data, error } = await supabase.from("ghl_settings").select("inbound_webhook_url").maybeSingle();
+      if (error) setLoadError(error.message);
+      else {
+        setUrl(data?.inbound_webhook_url ?? "");
+        setConfigured(Boolean(data?.inbound_webhook_url));
       }
     })();
   }, []);
 
-  async function save(newUrl: string) {
+  useEffect(() => {
+    if (!isEditOpen) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && busy === null) setIsEditOpen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isEditOpen, busy]);
+
+  function openEditor() {
+    setDraftUrl(url);
+    setMessage(null);
+    setIsEditOpen(true);
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    const newUrl = draftUrl.trim();
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(newUrl);
+    } catch {
+      setMessage({ text: "Enter a valid HTTPS webhook URL.", isError: true });
+      return;
+    }
+    if (parsedUrl.protocol !== "https:") {
+      setMessage({ text: "The webhook URL must use HTTPS.", isError: true });
+      return;
+    }
+
     setBusy("save");
     setMessage(null);
-    const { data: auth } = await supabase.auth.getUser();
+    const { data: auth, error: authError } = await supabase.auth.getUser();
+    if (authError || !auth.user) {
+      setBusy(null);
+      setMessage({ text: authError?.message ?? "Sign in again before changing the webhook URL.", isError: true });
+      return;
+    }
     const { error } = await supabase
       .from("ghl_settings")
-      .upsert({ id: true, inbound_webhook_url: newUrl || null, updated_by: auth.user?.id ?? null });
+      .upsert({ id: true, inbound_webhook_url: newUrl, updated_by: auth.user.id });
     setBusy(null);
     if (error) {
       setMessage({ text: error.message, isError: true });
       return;
     }
     setUrl(newUrl);
-    setConfigured(Boolean(newUrl));
-    setMessage({ text: newUrl ? "Webhook URL saved." : "Webhook URL removed." });
+    setConfigured(true);
+    setIsEditOpen(false);
+    setMessage({ text: "GHL webhook link saved." });
   }
 
   async function sendTest() {
@@ -364,57 +436,91 @@ function GhlSettings() {
   if (loadError) {
     return (
       <p className="mt-2 text-sm text-red-600">
-        Couldn't load GHL settings ({loadError}). Run <code>supabase/migrations/0007_ghl_settings.sql</code> in the
-        Supabase SQL editor.
+        Couldn't load GHL settings ({loadError}). Run <code>supabase/migrations/0007_ghl_settings.sql</code> and{" "}
+        <code>0008_ghl_settings_open_access.sql</code> in the Supabase SQL editor.
       </p>
     );
   }
-  if (isAdmin === null || configured === null) return <p className="mt-2 text-sm text-plum/50">Loading…</p>;
+  if (configured === null) return <p className="mt-2 text-sm text-plum/50">Loading…</p>;
 
   return (
     <div className="mt-3 space-y-3">
       <p className="text-xs">
         Status: {configured ? <span className="font-medium text-plum">Connected</span> : <span className="text-plum/50">not set</span>}
       </p>
-      {isAdmin ? (
-        <form
-          className="space-y-2"
-          onSubmit={(e: FormEvent) => { e.preventDefault(); save(url.trim()); }}
-        >
-          <label className="block text-sm">
-            <span className="font-medium text-plum-dark">Inbound Webhook URL</span>
-            <input
-              type="url" autoComplete="off" pattern="https://.*"
-              placeholder="https://services.leadconnectorhq.com/hooks/…/webhook-trigger/…"
-              className="mt-1 w-full rounded-lg border border-plum/20 px-3 py-1.5 font-mono text-xs"
-              value={url} onChange={(e) => setUrl(e.target.value)}
-            />
-            <span className="mt-0.5 block text-xs text-plum/50">
-              In GHL: Automation → Workflows → trigger "Inbound Webhook" → copy its URL. Paste a different account's URL to switch.
-            </span>
-          </label>
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="submit" className="btn-primary !px-4 !py-1.5 text-sm" disabled={busy !== null || !url.trim()}>
-              {busy === "save" ? "Saving…" : "Save"}
-            </button>
-            <button
-              type="button" disabled={busy !== null || !configured}
-              className="rounded-lg border border-plum/20 px-4 py-1.5 text-sm font-medium text-plum hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={sendTest}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="btn-secondary !px-4 !py-2 text-sm"
+            onClick={openEditor}
+          >
+            {configured ? "Edit" : "Add webhook"}
+          </button>
+          <button
+            type="button"
+            disabled={busy !== null || !configured}
+            className="rounded-full border border-plum/20 px-4 py-2 text-sm font-medium text-plum hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={sendTest}
+          >
+            {busy === "test" ? "Sending…" : "Send test lead"}
+          </button>
+        </div>
+        {isEditOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget && busy === null) setIsEditOpen(false);
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="ghl-webhook-dialog-title"
+              className="w-full max-w-lg rounded-[10px] border border-hairline bg-white p-6 shadow-xl sm:p-8"
             >
-              {busy === "test" ? "Sending…" : "Send test lead"}
-            </button>
-            {configured && (
-              <button type="button" className="text-xs text-red-500 hover:underline" disabled={busy !== null}
-                onClick={() => confirm("Disconnect GHL? Save to GHL will stop working until a new URL is saved.") && save("")}>
-                Remove
-              </button>
-            )}
+              <h3 id="ghl-webhook-dialog-title" className="font-serif text-xl text-plum-dark">
+                Edit GHL Webhook Link
+              </h3>
+              <p className="mt-2 text-sm text-plum/60">
+                Paste the Inbound Webhook URL from the GHL workflow you want to use.
+              </p>
+              <form onSubmit={save} className="mt-5 space-y-4">
+                <label className="block text-sm">
+                  <span className="font-medium text-plum-dark">GHL Webhook Link</span>
+                  <input
+                    type="url"
+                    required
+                    autoComplete="url"
+                    inputMode="url"
+                    placeholder="https://services.leadconnectorhq.com/hooks/…"
+                    className="mt-1 w-full px-3 py-2 font-mono text-xs"
+                    value={draftUrl}
+                    onChange={(event) => setDraftUrl(event.target.value)}
+                  />
+                  <span className="mt-1 block text-xs text-plum/50">
+                    The link must use HTTPS.
+                  </span>
+                </label>
+                {message?.isError && <p role="alert" className="text-sm text-red-600">{message.text}</p>}
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    className="rounded-full border border-plum/20 px-4 py-2 text-sm font-medium text-plum hover:bg-plum/5 disabled:opacity-50"
+                    disabled={busy !== null}
+                    onClick={() => setIsEditOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary !px-5 !py-2 text-sm" disabled={busy !== null}>
+                    {busy === "save" ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              </form>
+            </section>
           </div>
-        </form>
-      ) : (
-        <p className="text-xs text-plum/50">Only admins can change the GHL connection.</p>
-      )}
+        )}
+      </div>
       {message && <p className={`text-xs ${message.isError ? "text-red-600" : "text-plum"}`}>{message.text}</p>}
     </div>
   );
@@ -525,12 +631,11 @@ npx tsc --noEmit
 
 ### Step 7. Paste the URL into the app
 
-1. Sign in to the app as an **admin**. To make someone an admin, run
-   `update profiles set role = 'admin' where id = '<user-id>';` in Supabase.
-2. Go to **Settings → GoHighLevel**, paste the URL and click **Save**. The status changes to **Connected**.
+1. Sign in to the app with any user.
+2. Go to **Settings → GoHighLevel**, click **Add webhook** (or **Edit**), paste the URL and click **Save changes**. The status changes to **Connected**.
 3. Click **Send test lead**. This sends one sample lead that contains every field.
 
-To **switch GHL accounts** later, paste the new account's URL and click **Save**. To disconnect, click **Remove**.
+To **switch GHL accounts** later, click **Edit**, paste the new account's URL and click **Save changes**.
 
 ### Step 8. Capture the sample in GHL
 
@@ -594,12 +699,11 @@ Optional actions:
 
 | Message | Cause and fix |
 |---|---|
-| Settings: `Couldn't load GHL settings … Run 0007_ghl_settings.sql` | The migration hasn't been applied. Run Step 1's SQL. |
-| Settings: `Only admins can change the GHL connection.` | Your profile role isn't `admin`. See Step 7. |
-| Settings: `new row violates row-level security policy` | Same cause: you aren't an admin. |
+| Settings: `Couldn't load GHL settings … Run 0007 … and 0008 …` | The migrations haven't been applied. Run Step 1's SQL. |
+| Settings: `new row violates row-level security policy` | 0008 hasn't been run, so only admins can save. Run Step 1b. |
 | `No GHL webhook URL is set…` | Nothing is saved in Settings and there is no env fallback. Paste the URL (Step 7). |
 | `Sign in again to save to GHL.` | The session expired. Log out and back in. On Vercel, also check that the Supabase URL and publishable key env vars are set. |
-| `You don't have permission to save leads to GHL.` | Viewer accounts can't push leads. |
+| `You don't have permission to save leads to GHL.` | The database function failed. Re-run the Step 1 migrations. |
 | `GHL rejected the test: GHL responded 404` | Wrong URL, or the workflow or trigger was deleted. Copy the URL again. |
 | `Saved X to GHL; N failed: …` | GHL rejected some requests. Check the workflow is **Published**. |
 | Contacts appear without a name or company | The fields aren't mapped in Step 10. |
