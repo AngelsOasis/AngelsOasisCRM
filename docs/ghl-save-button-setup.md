@@ -257,7 +257,9 @@ function label(value: unknown): string | null {
 
 // Extra variables for the GHL Create/Update Contact mapping, added to every lead:
 // first/last name split from contact_person (so GHL doesn't show "SCP 1 1"),
-// readable labels, and `test` as a string GHL's If/Else can compare against.
+// and readable labels. Only the Settings test lead carries `test: "true"`; real
+// leads omit `test` entirely, so a GHL check on whether `test` exists or is
+// "true" can't send them down the test branch.
 function withGhlFields(payload: LeadPayload, test: boolean): LeadPayload {
   const fullName = typeof payload.contact_person === "string" ? payload.contact_person.trim().replace(/\s+/g, " ") : "";
   const [firstName = "", ...rest] = fullName ? fullName.split(" ") : [];
@@ -270,7 +272,7 @@ function withGhlFields(payload: LeadPayload, test: boolean): LeadPayload {
     status_label: label(payload.status),
     source_label: label(payload.source),
     source_app: "angels_oasis",
-    test: test ? "true" : "false",
+    ...(test ? { test: "true" } : {}),
   };
 }
 
@@ -585,7 +587,7 @@ const [syncMessage, setSyncMessage] = useState<string | null>(null);
 ```tsx
 // Sends the leads currently shown (respecting the status filter) to the GHL workflow.
 async function saveLeadsToGhl() {
-  if (!confirm(`Send ${leads.length} lead${leads.length === 1 ? "" : "s"} to GoHighLevel?`)) return;
+  if (!confirm(`Send ${visibleLeads.length} lead${visibleLeads.length === 1 ? "" : "s"} to GoHighLevel?`)) return;
   setSyncing(true);
   setSyncMessage(null);
   try {
@@ -596,7 +598,7 @@ async function saveLeadsToGhl() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${data.session?.access_token ?? ""}`,
       },
-      body: JSON.stringify({ leads }),
+      body: JSON.stringify({ leads: visibleLeads }),
     });
     const result = (await response.json().catch(() => ({}))) as {
       sent?: number;
@@ -606,9 +608,12 @@ async function saveLeadsToGhl() {
     if (result.error) setSyncMessage(result.error);
     else if (result.failed?.length)
       setSyncMessage(
-        `Saved ${result.sent} to GHL; ${result.failed.length} failed: ${result.failed.map((f) => f.facility_name).join(", ")}`
+        `Sent ${result.sent} to GHL; ${result.failed.length} failed: ${result.failed.map((f) => f.facility_name).join(", ")}`
       );
-    else setSyncMessage(`Saved ${result.sent} lead${result.sent === 1 ? "" : "s"} to GHL.`);
+    else
+      setSyncMessage(
+        `Sent ${result.sent} lead${result.sent === 1 ? "" : "s"} to GHL. If contacts don't appear, check the workflow's Execution logs in GHL.`
+      );
   } catch {
     setSyncMessage("Couldn't reach the server to save to GHL.");
   }
@@ -683,7 +688,7 @@ Each lead arrives as a flat JSON object with these fields:
 | `source_app` | always `angels_oasis` |
 | `full_name` / `first_name` / `last_name` | SCP 1 / SCP / 1 (split from `contact_person`) |
 | `category_label` / `status_label` / `source_label` | Hospital / Active Partner / Map Discovery |
-| `test` | `"true"` on the Settings test lead, `"false"` on real leads (always a string) |
+| `test` | `"true"` only on the Settings test lead; real leads don't include `test` at all |
 
 ### Step 9. Create the custom fields (once per GHL account)
 

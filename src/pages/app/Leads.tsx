@@ -1,8 +1,17 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { Download, Upload } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Download, Search, Upload } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 import { leadLocationFields } from "../../lib/geo";
 import { LEAD_CATEGORIES, LEAD_STATUSES, type Facility, type Lead, type LeadCategory, type LeadStatus } from "../../lib/types";
+
+type SortOrder = "newest" | "oldest" | "az" | "za";
+
+const SORT_OPTIONS: { value: SortOrder; label: string }[] = [
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+  { value: "az", label: "Facility A–Z" },
+  { value: "za", label: "Facility Z–A" },
+];
 
 const emptyForm = {
   facility_name: "",
@@ -24,6 +33,8 @@ export default function Leads() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("all");
+  const [search, setSearch] = useState("");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [facilities, setFacilities] = useState<Facility[]>([]);
@@ -33,6 +44,29 @@ export default function Leads() {
   useEffect(() => {
     supabase.from("facilities").select("*").then(({ data }) => setFacilities((data as Facility[]) ?? []));
   }, []);
+
+  // Search and sort run in the browser on the loaded leads; CSV Export and
+  // Save to GHL use this same list, so they act on exactly what's shown.
+  const visibleLeads = useMemo(() => {
+    const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = terms.length
+      ? leads.filter((lead) => {
+          const text = [
+            lead.facility_name, lead.contact_person, lead.email, lead.phone, lead.address,
+            lead.county, lead.department, lead.notes, lead.category.replaceAll("_", " "),
+          ].join(" ").toLowerCase();
+          return terms.every((term) => text.includes(term));
+        })
+      : leads;
+    return [...matches].sort((a, b) => {
+      if (sortOrder === "az" || sortOrder === "za") {
+        const byName = a.facility_name.localeCompare(b.facility_name, undefined, { sensitivity: "base", numeric: true });
+        return sortOrder === "az" ? byName : -byName;
+      }
+      const byDate = a.created_at.localeCompare(b.created_at);
+      return sortOrder === "oldest" ? byDate : -byDate;
+    });
+  }, [leads, search, sortOrder]);
 
   async function loadLeads() {
     setLoading(true);
@@ -83,7 +117,7 @@ export default function Leads() {
 
   // Sends the leads currently shown (respecting the status filter) to the GHL workflow.
   async function saveLeadsToGhl() {
-    if (!confirm(`Send ${leads.length} lead${leads.length === 1 ? "" : "s"} to GoHighLevel?`)) return;
+    if (!confirm(`Send ${visibleLeads.length} lead${visibleLeads.length === 1 ? "" : "s"} to GoHighLevel?`)) return;
     setSyncing(true);
     setSyncMessage(null);
     try {
@@ -94,7 +128,7 @@ export default function Leads() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${data.session?.access_token ?? ""}`,
         },
-        body: JSON.stringify({ leads }),
+        body: JSON.stringify({ leads: visibleLeads }),
       });
       const result = (await response.json().catch(() => ({}))) as {
         sent?: number;
@@ -104,9 +138,12 @@ export default function Leads() {
       if (result.error) setSyncMessage(result.error);
       else if (result.failed?.length)
         setSyncMessage(
-          `Saved ${result.sent} to GHL; ${result.failed.length} failed: ${result.failed.map((f) => f.facility_name).join(", ")}`
+          `Sent ${result.sent} to GHL; ${result.failed.length} failed: ${result.failed.map((f) => f.facility_name).join(", ")}`
         );
-      else setSyncMessage(`Saved ${result.sent} lead${result.sent === 1 ? "" : "s"} to GHL.`);
+      else
+        setSyncMessage(
+          `Sent ${result.sent} lead${result.sent === 1 ? "" : "s"} to GHL. If contacts don't appear, check the workflow's Execution logs in GHL.`
+        );
     } catch {
       setSyncMessage("Couldn't reach the server to save to GHL.");
     }
@@ -129,7 +166,7 @@ export default function Leads() {
       "Last Contacted",
       "Created At",
     ];
-    const rows = leads.map((lead) => [
+    const rows = visibleLeads.map((lead) => [
       lead.facility_name,
       lead.address,
       lead.county,
@@ -170,7 +207,7 @@ export default function Leads() {
           <button
             type="button"
             onClick={exportLeadsCSV}
-            disabled={loading || leads.length === 0}
+            disabled={loading || visibleLeads.length === 0}
             className="inline-flex items-center gap-2 rounded-lg border border-plum/20 px-4 py-2 text-sm font-medium text-plum transition-colors hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Download className="h-4 w-4" />
@@ -179,7 +216,7 @@ export default function Leads() {
           <button
             type="button"
             onClick={saveLeadsToGhl}
-            disabled={loading || syncing || leads.length === 0}
+            disabled={loading || syncing || visibleLeads.length === 0}
             className="inline-flex items-center gap-2 rounded-lg border border-plum/20 px-4 py-2 text-sm font-medium text-plum transition-colors hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Upload className="h-4 w-4" />
@@ -224,13 +261,38 @@ export default function Leads() {
         </form>
       )}
 
-      <div className="mt-6 flex items-center gap-2">
-        <span className="text-sm text-plum/60">Filter:</span>
-        <select className="rounded-lg border border-plum/20 px-2 py-1 text-sm"
-          value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as LeadStatus | "all")}>
-          <option value="all">All statuses</option>
-          {LEAD_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
+      <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <label className="relative w-full sm:w-72">
+          <span className="sr-only">Search leads</span>
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-plum/40" />
+          <input
+            type="search"
+            placeholder="Search facility, contact, email, phone…"
+            className="w-full rounded-lg border border-plum/20 py-1 pl-8 pr-2 text-sm"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-sm text-plum/60">Filter:</span>
+          <select className="rounded-lg border border-plum/20 px-2 py-1 text-sm"
+            value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as LeadStatus | "all")}>
+            <option value="all">All statuses</option>
+            {LEAD_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-sm text-plum/60">Sort:</span>
+          <select className="rounded-lg border border-plum/20 px-2 py-1 text-sm"
+            value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)}>
+            {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        {!loading && search.trim() && (
+          <span className="text-xs text-plum/50">
+            {visibleLeads.length} of {leads.length} lead{leads.length === 1 ? "" : "s"}
+          </span>
+        )}
       </div>
 
       <div className="mt-4 overflow-x-auto rounded-2xl border border-plum/10 bg-white">
@@ -251,7 +313,10 @@ export default function Leads() {
             {!loading && leads.length === 0 && (
               <tr><td className="px-4 py-6 text-plum/50" colSpan={7}>No leads yet — add one, import a CSV, or discover some on the Hospitals Map.</td></tr>
             )}
-            {leads.map((lead) => (
+            {!loading && leads.length > 0 && visibleLeads.length === 0 && (
+              <tr><td className="px-4 py-6 text-plum/50" colSpan={7}>No leads match "{search.trim()}".</td></tr>
+            )}
+            {visibleLeads.map((lead) => (
               <tr key={lead.id}>
                 <td className="px-4 py-3 font-medium">{lead.facility_name}</td>
                 <td className="px-4 py-3 capitalize">{lead.category.replaceAll("_", " ")}</td>

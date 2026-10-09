@@ -107,7 +107,9 @@ function label(value: unknown): string | null {
 
 // Extra variables for the GHL Create/Update Contact mapping, added to every lead:
 // first/last name split from contact_person (so GHL doesn't show "SCP 1 1"),
-// readable labels, and `test` as a string GHL's If/Else can compare against.
+// and readable labels. Only the Settings test lead carries `test: "true"`; real
+// leads omit `test` entirely, so a GHL check on whether `test` exists or is
+// "true" can't send them down the test branch.
 function withGhlFields(payload: LeadPayload, test: boolean): LeadPayload {
   const fullName = typeof payload.contact_person === "string" ? payload.contact_person.trim().replace(/\s+/g, " ") : "";
   const [firstName = "", ...rest] = fullName ? fullName.split(" ") : [];
@@ -120,7 +122,7 @@ function withGhlFields(payload: LeadPayload, test: boolean): LeadPayload {
     status_label: label(payload.status),
     source_label: label(payload.source),
     source_app: "angels_oasis",
-    test: test ? "true" : "false",
+    ...(test ? { test: "true" } : {}),
   };
 }
 
