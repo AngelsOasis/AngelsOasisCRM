@@ -17,7 +17,7 @@ deliberately an MVP: solid data model and core flows, built out further as you g
 | Supabase **publishable** key (`sb_publishable_...`) + project URL | `.env.local` at the project root (copy `.env.example`), or your host's environment variables (`VITE_SUPABASE_URL` + `VITE_SUPABASE_PUBLISHABLE_KEY`, or Supabase's `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY`) | Safe to expose client-side by design — same idea as a Stripe publishable key |
 | Supabase **service-role** key | Supabase Edge Function secrets only, if a separately deployed server-side function requires it | Full DB access — must never reach the browser |
 | Brevo API key | Supabase Dashboard → Project Settings → Edge Functions → Secrets, as `BREVO_API_KEY` | Server-side only; never put it in frontend env files or commit it |
-| GoHighLevel inbound webhook URL | Hosting provider's **server-side** environment as `GHL_INBOUND_WEBHOOK_URL` | Used by `/api/ghl-sync` to send leads; never prefix it with `VITE_` or commit the actual URL |
+| GoHighLevel inbound webhook URL | In the app: **Settings → GoHighLevel** (admins only; stored in the `ghl_settings` table, migration 0007). Optional fallback: server-side env var `GHL_INBOUND_WEBHOOK_URL` | Used by `/api/ghl-sync` to send leads; switch GHL accounts by pasting a new URL in Settings. Never prefix the env var with `VITE_` |
 | Maps/Places API key (if you swap Leaflet for Google Maps) | `.env.local` as `VITE_GOOGLE_MAPS_KEY` if it's a browser-restricted key, otherwise as a Supabase secret if used server-side for Places lookups | Depends on how you restrict the key in Google Cloud Console |
 
 The manual Campaign Writer does not call an AI provider or require DeepSeek/API secrets. It writes
@@ -79,7 +79,7 @@ valid-email filtering, and suppression of unsubscribed/do-not-contact leads).
   `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in that host's environment variable
   settings — never commit `.env.local`.
 - **Backend:** Supabase hosts your database, auth, and Edge Functions — nothing else to deploy there.
-- **GHL lead sync:** set `GHL_INBOUND_WEBHOOK_URL` in the hosting provider's server-side environment for `/api/ghl-sync`. Never use a `VITE_` prefix; configure it in the local server runtime when testing.
+- **GHL lead sync:** run `supabase/migrations/0007_ghl_settings.sql`, then an admin pastes the GHL Inbound Webhook URL in **Settings → GoHighLevel** ("Send test lead" checks it). `GHL_INBOUND_WEBHOOK_URL` in the server environment is only a fallback; never use a `VITE_` prefix.
 - **Campaign sender:** verify your sending domain and sender in Brevo. In Supabase Dashboard →
   Project Settings → Edge Functions → Secrets, add `BREVO_API_KEY` with your Brevo API key. Do not
   put the key in `.env.local`, `.env.example`, frontend settings, or source code. Then deploy with

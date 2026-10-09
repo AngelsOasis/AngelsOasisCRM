@@ -153,6 +153,133 @@ function SendingSettings({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
+// The GoHighLevel Inbound Webhook URL used by the Leads page's "Save to GHL"
+// button. Stored in the ghl_settings table (admins only); api/ghl-sync.ts reads it.
+function GhlSettings() {
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [url, setUrl] = useState("");
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | null>(null);
+  const [message, setMessage] = useState<{ text: string; isError?: boolean } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", auth.user?.id ?? "").maybeSingle();
+      const admin = profile?.role === "admin";
+      setIsAdmin(admin);
+      if (admin) {
+        const { data, error } = await supabase.from("ghl_settings").select("inbound_webhook_url").maybeSingle();
+        if (error) setLoadError(error.message);
+        else {
+          setUrl(data?.inbound_webhook_url ?? "");
+          setConfigured(Boolean(data?.inbound_webhook_url));
+        }
+      } else {
+        const { data, error } = await supabase.rpc("ghl_webhook_configured");
+        if (error) setLoadError(error.message);
+        else setConfigured(Boolean(data));
+      }
+    })();
+  }, []);
+
+  async function save(newUrl: string) {
+    setBusy("save");
+    setMessage(null);
+    const { data: auth } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from("ghl_settings")
+      .upsert({ id: true, inbound_webhook_url: newUrl || null, updated_by: auth.user?.id ?? null });
+    setBusy(null);
+    if (error) {
+      setMessage({ text: error.message, isError: true });
+      return;
+    }
+    setUrl(newUrl);
+    setConfigured(Boolean(newUrl));
+    setMessage({ text: newUrl ? "Webhook URL saved." : "Webhook URL removed." });
+  }
+
+  async function sendTest() {
+    setBusy("test");
+    setMessage(null);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const response = await fetch("/api/ghl-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${data.session?.access_token ?? ""}` },
+        body: JSON.stringify({ test: true }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { sent?: number; failed?: Array<{ error: string }>; error?: string };
+      if (result.error) setMessage({ text: result.error, isError: true });
+      else if (result.failed?.length) setMessage({ text: `GHL rejected the test: ${result.failed[0].error}`, isError: true });
+      else setMessage({ text: "Test lead sent. In GHL, open the Inbound Webhook trigger and click Fetch Sample Requests." });
+    } catch {
+      setMessage({ text: "Couldn't reach the server to send the test.", isError: true });
+    }
+    setBusy(null);
+  }
+
+  if (loadError) {
+    return (
+      <p className="mt-2 text-sm text-red-600">
+        Couldn't load GHL settings ({loadError}). Run <code>supabase/migrations/0007_ghl_settings.sql</code> in the
+        Supabase SQL editor.
+      </p>
+    );
+  }
+  if (isAdmin === null || configured === null) return <p className="mt-2 text-sm text-plum/50">Loading…</p>;
+
+  return (
+    <div className="mt-3 space-y-3">
+      <p className="text-xs">
+        Status: {configured ? <span className="font-medium text-plum">Connected</span> : <span className="text-plum/50">not set</span>}
+      </p>
+      {isAdmin ? (
+        <form
+          className="space-y-2"
+          onSubmit={(e: FormEvent) => { e.preventDefault(); save(url.trim()); }}
+        >
+          <label className="block text-sm">
+            <span className="font-medium text-plum-dark">Inbound Webhook URL</span>
+            <input
+              type="url" autoComplete="off" pattern="https://.*"
+              placeholder="https://services.leadconnectorhq.com/hooks/…/webhook-trigger/…"
+              className="mt-1 w-full rounded-lg border border-plum/20 px-3 py-1.5 font-mono text-xs"
+              value={url} onChange={(e) => setUrl(e.target.value)}
+            />
+            <span className="mt-0.5 block text-xs text-plum/50">
+              In GHL: Automation → Workflows → trigger "Inbound Webhook" → copy its URL. Paste a different account's URL to switch.
+            </span>
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="submit" className="btn-primary !px-4 !py-1.5 text-sm" disabled={busy !== null || !url.trim()}>
+              {busy === "save" ? "Saving…" : "Save"}
+            </button>
+            <button
+              type="button" disabled={busy !== null || !configured}
+              className="rounded-lg border border-plum/20 px-4 py-1.5 text-sm font-medium text-plum hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={sendTest}
+            >
+              {busy === "test" ? "Sending…" : "Send test lead"}
+            </button>
+            {configured && (
+              <button type="button" className="text-xs text-red-500 hover:underline" disabled={busy !== null}
+                onClick={() => confirm("Disconnect GHL? Save to GHL will stop working until a new URL is saved.") && save("")}>
+                Remove
+              </button>
+            )}
+          </div>
+        </form>
+      ) : (
+        <p className="text-xs text-plum/50">Only admins can change the GHL connection.</p>
+      )}
+      {message && <p className={`text-xs ${message.isError ? "text-red-600" : "text-plum"}`}>{message.text}</p>}
+    </div>
+  );
+}
+
 export default function Settings() {
   const [status, setStatus] = useState<IntegrationStatus | null | undefined>(undefined);
 
@@ -196,6 +323,15 @@ export default function Settings() {
           <h2 className="font-serif text-lg">Sending</h2>
           <p className="mt-2 text-sm text-plum/60">Used on every campaign email.</p>
           <SendingSettings isAdmin={Boolean(status?.isAdmin)} />
+        </div>
+
+        <div className="card">
+          <h2 className="font-serif text-lg">GoHighLevel</h2>
+          <p className="mt-2 text-sm text-plum/60">
+            Where the Leads page's <strong>Save to GHL</strong> button sends leads. Each lead is posted to a GHL
+            workflow's Inbound Webhook, which creates or updates the contact.
+          </p>
+          <GhlSettings />
         </div>
 
         <div className="card">

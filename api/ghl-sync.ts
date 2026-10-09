@@ -15,14 +15,43 @@ declare const process: {
 };
 
 // Posts leads to a GoHighLevel workflow's "Inbound Webhook" trigger, one
-// request per lead. The webhook URL is server-side only (GHL_INBOUND_WEBHOOK_URL)
-// so it never reaches the browser.
+// request per lead. The webhook URL is saved by an admin on the Settings page
+// (ghl_settings table, migration 0007) and read here with the caller's
+// session, so it never has to be shipped to the browser. The old
+// GHL_INBOUND_WEBHOOK_URL server env var still works as a fallback.
 export const config = { maxDuration: 60 };
 
 const MAX_LEADS = 500;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 type LeadPayload = Record<string, string | number | boolean | null>;
+
+// Sent by Settings → "Send test lead" so GHL's "Fetch Sample Requests" sees every field.
+const SAMPLE_LEAD: LeadPayload = {
+  id: "00000000-0000-0000-0000-000000000000",
+  facility_name: "Test Facility (Angels Oasis)",
+  address: "123 Example St, Los Angeles, CA 90001",
+  county: "Los Angeles",
+  latitude: 34.05,
+  longitude: -118.24,
+  nearest_facility_id: null,
+  distance_miles: 1.5,
+  contact_person: "Test Contact",
+  contact_title: "Discharge Planner",
+  department: "Case Management",
+  email: "test@example.com",
+  phone: "(555) 555-0100",
+  website: "https://example.com",
+  place_id: null,
+  category: "hospital",
+  status: "new",
+  source: "manual",
+  notes: "Test lead sent from Angels Oasis Settings.",
+  unsubscribed: false,
+  last_contacted_at: null,
+  created_at: new Date(0).toISOString(),
+  updated_at: new Date(0).toISOString(),
+};
 
 function firstConfigured(...values: Array<string | undefined>): string {
   return values.find((value) => value?.trim())?.trim() ?? "";
@@ -33,21 +62,41 @@ function header(request: ApiRequest, name: string): string {
   return (Array.isArray(value) ? value[0] : value) ?? "";
 }
 
-// Only signed-in staff can push to GHL: check the caller's Supabase session.
-async function isSignedIn(request: ApiRequest): Promise<boolean> {
+type WebhookLookup = { url: string } | { status: number; error: string };
+
+// Checks the caller's Supabase session and returns the GHL webhook URL they may use.
+async function resolveWebhookUrl(request: ApiRequest): Promise<WebhookLookup> {
   const token = header(request, "authorization").replace(/^Bearer\s+/i, "");
-  const url = firstConfigured(process.env.VITE_SUPABASE_URL, process.env.SUPABASE_URL);
+  const supabaseUrl = firstConfigured(process.env.VITE_SUPABASE_URL, process.env.SUPABASE_URL).replace(/\/+$/, "");
   const key = firstConfigured(
     process.env.VITE_SUPABASE_PUBLISHABLE_KEY,
     process.env.VITE_SUPABASE_ANON_KEY,
     process.env.SUPABASE_PUBLISHABLE_KEY,
     process.env.SUPABASE_ANON_KEY
   );
-  if (!token || !url || !key) return false;
-  const response = await fetch(`${url.replace(/\/+$/, "")}/auth/v1/user`, {
-    headers: { apikey: key, Authorization: `Bearer ${token}` },
+  if (!supabaseUrl || !key) return { status: 500, error: "Supabase URL and publishable key are not configured on the server." };
+  if (!token) return { status: 401, error: "Sign in again to save to GHL." };
+
+  const headers = { apikey: key, Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const user = await fetch(`${supabaseUrl}/auth/v1/user`, { headers }).catch(() => null);
+  if (!user?.ok) return { status: 401, error: "Sign in again to save to GHL." };
+
+  const rpc = await fetch(`${supabaseUrl}/rest/v1/rpc/ghl_inbound_webhook_url`, {
+    method: "POST",
+    headers,
+    body: "{}",
   }).catch(() => null);
-  return response?.ok ?? false;
+  const saved = rpc?.ok ? ((await rpc.json().catch(() => null)) as unknown) : null;
+  const url = (typeof saved === "string" && saved.trim()) || process.env.GHL_INBOUND_WEBHOOK_URL?.trim();
+  if (!url) {
+    return {
+      status: 400,
+      error: rpc && !rpc.ok && rpc.status !== 404
+        ? "You don't have permission to save leads to GHL."
+        : "No GHL webhook URL is set. An admin can add it in Settings → GoHighLevel.",
+    };
+  }
+  return { url };
 }
 
 function toPayload(lead: unknown): LeadPayload | null {
@@ -82,21 +131,23 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     return;
   }
 
-  const webhookUrl = process.env.GHL_INBOUND_WEBHOOK_URL?.trim();
-  if (!webhookUrl) {
-    response.status(500).json({ error: "GHL_INBOUND_WEBHOOK_URL is not configured on the server." });
+  const lookup = await resolveWebhookUrl(request);
+  if ("error" in lookup) {
+    response.status(lookup.status).json({ error: lookup.error });
     return;
   }
+  const webhookUrl = lookup.url;
 
-  if (!(await isSignedIn(request))) {
-    response.status(401).json({ error: "Sign in again to save to GHL." });
+  let body: { leads?: unknown; test?: unknown } | undefined;
+  try {
+    body = (typeof request.body === "string" ? JSON.parse(request.body || "{}") : request.body) as typeof body;
+  } catch {
+    response.status(400).json({ error: "Invalid JSON body." });
     return;
   }
-
-  const body = (typeof request.body === "string" ? JSON.parse(request.body || "{}") : request.body) as
-    | { leads?: unknown }
-    | undefined;
-  const leads = Array.isArray(body?.leads) ? body.leads.map(toPayload).filter((l): l is LeadPayload => !!l) : [];
+  const leads = body?.test === true
+    ? [{ ...SAMPLE_LEAD, source_app: "angels_oasis", test: true }]
+    : Array.isArray(body?.leads) ? body.leads.map(toPayload).filter((l): l is LeadPayload => !!l) : [];
   if (leads.length === 0) {
     response.status(400).json({ error: "No leads to send." });
     return;
