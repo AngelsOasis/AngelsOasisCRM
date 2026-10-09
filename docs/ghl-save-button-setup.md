@@ -249,15 +249,40 @@ async function resolveWebhookUrl(request: ApiRequest): Promise<WebhookLookup> {
   return { url };
 }
 
+// "skilled_nursing_facility" -> "Skilled Nursing Facility", for readable GHL fields and tags.
+function label(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  return value.trim().split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
+// Extra variables for the GHL Create/Update Contact mapping, added to every lead:
+// first/last name split from contact_person (so GHL doesn't show "SCP 1 1"),
+// readable labels, and `test` as a string GHL's If/Else can compare against.
+function withGhlFields(payload: LeadPayload, test: boolean): LeadPayload {
+  const fullName = typeof payload.contact_person === "string" ? payload.contact_person.trim().replace(/\s+/g, " ") : "";
+  const [firstName = "", ...rest] = fullName ? fullName.split(" ") : [];
+  return {
+    ...payload,
+    full_name: fullName || null,
+    first_name: firstName || null,
+    last_name: rest.join(" ") || null,
+    category_label: label(payload.category),
+    status_label: label(payload.status),
+    source_label: label(payload.source),
+    source_app: "angels_oasis",
+    test: test ? "true" : "false",
+  };
+}
+
 function toPayload(lead: unknown): LeadPayload | null {
   if (!lead || typeof lead !== "object") return null;
-  const payload: LeadPayload = { source_app: "angels_oasis" };
+  const payload: LeadPayload = {};
   for (const [key, value] of Object.entries(lead as Record<string, unknown>)) {
     if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
       payload[key] = value as string | number | boolean | null;
     }
   }
-  return typeof payload.id === "string" ? payload : null;
+  return typeof payload.id === "string" ? withGhlFields(payload, false) : null;
 }
 
 async function postToGhl(webhookUrl: string, payload: LeadPayload): Promise<string | null> {
@@ -296,7 +321,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     return;
   }
   const leads = body?.test === true
-    ? [{ ...SAMPLE_LEAD, source_app: "angels_oasis", test: true }]
+    ? [withGhlFields(SAMPLE_LEAD, true)]
     : Array.isArray(body?.leads) ? body.leads.map(toPayload).filter((l): l is LeadPayload => !!l) : [];
   if (leads.length === 0) {
     response.status(400).json({ error: "No leads to send." });
@@ -656,7 +681,9 @@ Each lead arrives as a flat JSON object with these fields:
 | `source` | map_discovery |
 | `department`, `notes`, `last_contacted_at`, `created_at` | |
 | `source_app` | always `angels_oasis` |
-| `test` | `true` only on the Settings test lead |
+| `full_name` / `first_name` / `last_name` | SCP 1 / SCP / 1 (split from `contact_person`) |
+| `category_label` / `status_label` / `source_label` | Hospital / Active Partner / Map Discovery |
+| `test` | `"true"` on the Settings test lead, `"false"` on real leads (always a string) |
 
 ### Step 9. Create the custom fields (once per GHL account)
 
@@ -671,7 +698,8 @@ Under the trigger, choose **+ → Create/Update Contact** and map these fields:
 |---|---|
 | Email | `{{inboundWebhookRequest.email}}` |
 | Phone | `{{inboundWebhookRequest.phone}}` |
-| Full Name / First Name | `{{inboundWebhookRequest.contact_person}}` |
+| First Name | `{{inboundWebhookRequest.first_name}}` |
+| Last Name | `{{inboundWebhookRequest.last_name}}` |
 | Company Name | `{{inboundWebhookRequest.facility_name}}` |
 | Address | `{{inboundWebhookRequest.address}}` |
 | Website | `{{inboundWebhookRequest.website}}` |
@@ -682,7 +710,7 @@ Pick each value from the field picker. GHL shows the sample request's keys there
 
 Optional actions:
 
-- **If/Else** on `test = true` → **End**, so test leads don't become contacts.
+- **If/Else** on `test` **is** `true` (lowercase) → **End**, so test leads don't become contacts.
 - **Add Tag**: `angels-oasis`
 - **Create/Update Opportunity**: put the contact into your referral pipeline
 - **Add to Workflow**: start an email sequence

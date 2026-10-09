@@ -99,15 +99,40 @@ async function resolveWebhookUrl(request: ApiRequest): Promise<WebhookLookup> {
   return { url };
 }
 
+// "skilled_nursing_facility" -> "Skilled Nursing Facility", for readable GHL fields and tags.
+function label(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  return value.trim().split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
+// Extra variables for the GHL Create/Update Contact mapping, added to every lead:
+// first/last name split from contact_person (so GHL doesn't show "SCP 1 1"),
+// readable labels, and `test` as a string GHL's If/Else can compare against.
+function withGhlFields(payload: LeadPayload, test: boolean): LeadPayload {
+  const fullName = typeof payload.contact_person === "string" ? payload.contact_person.trim().replace(/\s+/g, " ") : "";
+  const [firstName = "", ...rest] = fullName ? fullName.split(" ") : [];
+  return {
+    ...payload,
+    full_name: fullName || null,
+    first_name: firstName || null,
+    last_name: rest.join(" ") || null,
+    category_label: label(payload.category),
+    status_label: label(payload.status),
+    source_label: label(payload.source),
+    source_app: "angels_oasis",
+    test: test ? "true" : "false",
+  };
+}
+
 function toPayload(lead: unknown): LeadPayload | null {
   if (!lead || typeof lead !== "object") return null;
-  const payload: LeadPayload = { source_app: "angels_oasis" };
+  const payload: LeadPayload = {};
   for (const [key, value] of Object.entries(lead as Record<string, unknown>)) {
     if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
       payload[key] = value as string | number | boolean | null;
     }
   }
-  return typeof payload.id === "string" ? payload : null;
+  return typeof payload.id === "string" ? withGhlFields(payload, false) : null;
 }
 
 async function postToGhl(webhookUrl: string, payload: LeadPayload): Promise<string | null> {
@@ -146,7 +171,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     return;
   }
   const leads = body?.test === true
-    ? [{ ...SAMPLE_LEAD, source_app: "angels_oasis", test: true }]
+    ? [withGhlFields(SAMPLE_LEAD, true)]
     : Array.isArray(body?.leads) ? body.leads.map(toPayload).filter((l): l is LeadPayload => !!l) : [];
   if (leads.length === 0) {
     response.status(400).json({ error: "No leads to send." });
