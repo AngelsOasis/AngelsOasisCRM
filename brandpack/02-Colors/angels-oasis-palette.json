@@ -1,0 +1,182 @@
+[
+  {
+    "name": "Plum",
+    "token": "--ao-plum",
+    "group": "Core",
+    "hex": "#533841",
+    "rgb": "83, 56, 65",
+    "cmyk_approx": "0, 33, 22, 67",
+    "use": "Header, title slides, cards, headings on light grounds"
+  },
+  {
+    "name": "Forest",
+    "token": "--ao-forest",
+    "group": "Core",
+    "hex": "#3F6950",
+    "rgb": "63, 105, 80",
+    "cmyk_approx": "40, 0, 24, 59",
+    "use": "Primary buttons, links, small accents"
+  },
+  {
+    "name": "Sage",
+    "token": "--ao-sage",
+    "group": "Core",
+    "hex": "#A9CBB7",
+    "rgb": "169, 203, 183",
+    "cmyk_approx": "17, 0, 10, 20",
+    "use": "Secondary buttons, pills, bands"
+  },
+  {
+    "name": "Cream",
+    "token": "--ao-cream",
+    "group": "Core",
+    "hex": "#FBF5F0",
+    "rgb": "251, 245, 240",
+    "cmyk_approx": "0, 2, 4, 2",
+    "use": "Text on Plum; warm page ground"
+  },
+  {
+    "name": "Linen",
+    "token": "--ao-linen",
+    "group": "Core",
+    "hex": "#EEEBE7",
+    "rgb": "238, 235, 231",
+    "cmyk_approx": "0, 1, 3, 7",
+    "use": "Section grounds"
+  },
+  {
+    "name": "White",
+    "token": "--ao-white",
+    "group": "Core",
+    "hex": "#FFFFFF",
+    "rgb": "255, 255, 255",
+    "cmyk_approx": "0, 0, 0, 0",
+    "use": "Cards, page ground"
+  },
+  {
+    "name": "Deep Plum",
+    "token": "--ao-plum-deep",
+    "group": "Supporting",
+    "hex": "#36272C",
+    "rgb": "54, 39, 44",
+    "cmyk_approx": "0, 28, 19, 79",
+    "use": "Testimonial cards, deepest ground"
+  },
+  {
+    "name": "Mauve",
+    "token": "--ao-mauve",
+    "group": "Supporting",
+    "hex": "#9F7785",
+    "rgb": "159, 119, 133",
+    "cmyk_approx": "0, 25, 16, 38",
+    "use": "Logo mark on Plum (never text)"
+  },
+  {
+    "name": "Deep Mauve",
+    "token": "--ao-mauve-deep",
+    "group": "Supporting",
+    "hex": "#8F6170",
+    "rgb": "143, 97, 112",
+    "cmyk_approx": "0, 32, 22, 44",
+    "use": "Logo mark and icons on light grounds"
+  },
+  {
+    "name": "Deep Forest",
+    "token": "--ao-forest-deep",
+    "group": "Supporting",
+    "hex": "#18291C",
+    "rgb": "24, 41, 28",
+    "cmyk_approx": "41, 0, 32, 84",
+    "use": "Text on Sage and Light Sage"
+  },
+  {
+    "name": "Fern",
+    "token": "--ao-fern",
+    "group": "Supporting",
+    "hex": "#7EA686",
+    "rgb": "126, 166, 134",
+    "cmyk_approx": "24, 0, 19, 35",
+    "use": "Decorative green; never text on light"
+  },
+  {
+    "name": "Light Sage",
+    "token": "--ao-sage-light",
+    "group": "Supporting",
+    "hex": "#C9DED2",
+    "rgb": "201, 222, 210",
+    "cmyk_approx": "9, 0, 5, 13",
+    "use": "Soft panels"
+  },
+  {
+    "name": "Taupe",
+    "token": "--ao-taupe",
+    "group": "Supporting",
+    "hex": "#C4B9AB",
+    "rgb": "196, 185, 171",
+    "cmyk_approx": "0, 6, 13, 23",
+    "use": "App icon mark"
+  },
+  {
+    "name": "Ivory",
+    "token": "--ao-ivory",
+    "group": "Supporting",
+    "hex": "#F5F1E8",
+    "rgb": "245, 241, 232",
+    "cmyk_approx": "0, 2, 5, 4",
+    "use": "Logo wordmark on Plum"
+  },
+  {
+    "name": "Gold",
+    "token": "--ao-gold",
+    "group": "Supporting",
+    "hex": "#E5A93C",
+    "rgb": "229, 169, 60",
+    "cmyk_approx": "0, 26, 74, 10",
+    "use": "Rating stars only"
+  },
+  {
+    "name": "Ink",
+    "token": "--ao-ink",
+    "group": "Text",
+    "hex": "#222222",
+    "rgb": "34, 34, 34",
+    "cmyk_approx": "0, 0, 0, 87",
+    "use": "Headings"
+  },
+  {
+    "name": "Body",
+    "token": "--ao-body",
+    "group": "Text",
+    "hex": "#333333",
+    "rgb": "51, 51, 51",
+    "cmyk_approx": "0, 0, 0, 80",
+    "use": "Body copy"
+  },
+  {
+    "name": "Charcoal",
+    "token": "--ao-charcoal",
+    "group": "Text",
+    "hex": "#3B3B3B",
+    "rgb": "59, 59, 59",
+    "cmyk_approx": "0, 0, 0, 77",
+    "use": "Footer ground, eyebrow labels"
+  },
+  {
+    "name": "Gray",
+    "token": "--ao-gray",
+    "group": "Text",
+    "hex": "#616161",
+    "rgb": "97, 97, 97",
+    "cmyk_approx": "0, 0, 0, 62",
+    "use": "Secondary text"
+  },
+  {
+    "name": "Light Gray",
+    "token": "--ao-gray-light",
+    "group": "Text",
+    "hex": "#777777",
+    "rgb": "119, 119, 119",
+    "cmyk_approx": "0, 0, 0, 53",
+    "use": "Legacy footer text on the site; prefer Gray"
+  }
+]

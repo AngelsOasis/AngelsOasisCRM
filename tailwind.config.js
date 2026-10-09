@@ -4,22 +4,37 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Angels Oasis CRM design system: white, plum, black — nothing else.
+        // Brand Pack palette. Keep legacy plum/ink names as aliases used by app screens.
         plum: {
-          DEFAULT: "#4A1D3D",
-          dark: "#2E1226",
-          light: "#6B2C56",
-          50: "#F5EEF2",
-          100: "#E7D6E1",
+          DEFAULT: "#533841",
+          dark: "#36272C",
+          light: "#715760",
+          50: "#FBF5F0",
+          100: "#EEEBE7",
         },
         ink: {
-          DEFAULT: "#0A0A0A", // "black" — kept as a named token instead of raw #000
-          soft: "#1F1F1F",
+          DEFAULT: "#222222",
+          soft: "#333333",
         },
+        forest: {
+          DEFAULT: "#3F6950",
+          deep: "#18291C",
+        },
+        sage: {
+          DEFAULT: "#A9CBB7",
+          light: "#C9DED2",
+        },
+        mauve: {
+          DEFAULT: "#9F7785",
+          deep: "#8F6170",
+        },
+        linen: "#EEEBE7",
+        cream: "#FBF5F0",
+        hairline: "#E7E5E4",
       },
       fontFamily: {
-        serif: ["'Playfair Display'", "Georgia", "serif"],
-        sans: ["'Inter'", "system-ui", "sans-serif"],
+        serif: ["Fraunces", "Georgia", "Cambria", "'Times New Roman'", "serif"],
+        sans: ["Inter", "system-ui", "-apple-system", "'Segoe UI'", "Roboto", "sans-serif"],
       },
     },
   },

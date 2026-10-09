@@ -2,31 +2,101 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "Fraunces";
+  src: url("/brand/fraunces-latin-wght-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Fraunces";
+  src: url("/brand/fraunces-latin-wght-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/brand/inter-latin-opsz-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/brand/inter-latin-wght-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 @layer base {
+  :root {
+    --ao-plum: #533841;
+    --ao-plum-deep: #36272c;
+    --ao-forest: #3f6950;
+    --ao-forest-deep: #18291c;
+    --ao-sage: #a9cbb7;
+    --ao-sage-light: #c9ded2;
+    --ao-cream: #fbf5f0;
+    --ao-linen: #eeebe7;
+    --ao-ink: #222222;
+    --ao-body: #333333;
+    --ao-gray: #616161;
+    --ao-hairline: #e7e5e4;
+  }
+
   html {
     scroll-behavior: smooth;
   }
+
   body {
-    @apply bg-white text-ink font-sans antialiased;
+    @apply bg-cream text-ink-soft font-sans antialiased;
+    min-width: 320px;
   }
+
   h1, h2, h3, h4 {
     @apply font-serif text-plum-dark;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    @apply rounded-md border-hairline bg-white text-ink-soft;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):focus,
+  select:focus,
+  textarea:focus {
+    @apply border-forest outline-none ring-2 ring-forest/20;
+  }
+
+  button:focus-visible,
+  a:focus-visible {
+    @apply outline-none ring-2 ring-forest ring-offset-2;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-full bg-ink px-6 py-3 font-semibold text-white
-           transition hover:bg-plum focus:outline-none focus:ring-2 focus:ring-plum focus:ring-offset-2;
+    @apply inline-flex items-center justify-center rounded-full bg-forest px-6 py-3 font-semibold text-white
+           transition hover:bg-forest-deep focus:outline-none focus:ring-2 focus:ring-forest focus:ring-offset-2;
   }
+
   .btn-secondary {
-    @apply inline-flex items-center justify-center rounded-full border-2 border-ink px-6 py-3 font-semibold text-ink
-           transition hover:bg-ink hover:text-white focus:outline-none focus:ring-2 focus:ring-ink focus:ring-offset-2;
+    @apply inline-flex items-center justify-center rounded-full bg-sage px-6 py-3 font-semibold text-forest-deep
+           transition hover:bg-sage-light focus:outline-none focus:ring-2 focus:ring-forest focus:ring-offset-2;
   }
+
   .card {
-    @apply rounded-2xl border border-ink/10 bg-white p-6 shadow-sm;
+    @apply rounded-[10px] border border-hairline bg-white p-6 shadow-sm;
   }
+
   .badge {
-    @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold;
+    @apply inline-flex items-center rounded-full bg-sage-light px-3 py-1 text-xs font-semibold text-forest-deep;
   }
 }

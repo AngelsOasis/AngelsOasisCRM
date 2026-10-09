@@ -1,0 +1,110 @@
+{
+  "brand": "Angels Oasis",
+  "source": "angelsoasisclhf.com, October 2026",
+  "color": {
+    "plum": "#533841",
+    "forest": "#3F6950",
+    "sage": "#A9CBB7",
+    "cream": "#FBF5F0",
+    "linen": "#EEEBE7",
+    "white": "#FFFFFF",
+    "plum-deep": "#36272C",
+    "mauve": "#9F7785",
+    "mauve-deep": "#8F6170",
+    "forest-deep": "#18291C",
+    "fern": "#7EA686",
+    "sage-light": "#C9DED2",
+    "taupe": "#C4B9AB",
+    "ivory": "#F5F1E8",
+    "gold": "#E5A93C",
+    "ink": "#222222",
+    "body": "#333333",
+    "charcoal": "#3B3B3B",
+    "gray": "#616161",
+    "gray-light": "#777777",
+    "hairline": "#E7E5E4"
+  },
+  "font": {
+    "display": "Fraunces, Georgia, Cambria, \"Times New Roman\", serif",
+    "body": "Inter, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif"
+  },
+  "type": {
+    "display": {
+      "font": "display",
+      "weight": 600,
+      "size": 42,
+      "lineHeight": 48
+    },
+    "headline": {
+      "font": "display",
+      "weight": 300,
+      "size": 40,
+      "lineHeight": 48
+    },
+    "headline-strong": {
+      "font": "display",
+      "weight": 700,
+      "size": 35,
+      "lineHeight": 44,
+      "letterSpacing": -0.5
+    },
+    "lead": {
+      "font": "display",
+      "weight": 300,
+      "size": 20,
+      "lineHeight": 25,
+      "letterSpacing": -0.5
+    },
+    "subhead": {
+      "font": "display",
+      "weight": 600,
+      "size": 18,
+      "lineHeight": 22.5
+    },
+    "nav": {
+      "font": "display",
+      "weight": 400,
+      "size": 18,
+      "transform": "uppercase"
+    },
+    "body": {
+      "font": "body",
+      "weight": 400,
+      "size": 16,
+      "lineHeight": 26
+    },
+    "small": {
+      "font": "body",
+      "weight": 400,
+      "size": 14,
+      "lineHeight": 20
+    },
+    "eyebrow": {
+      "font": "body",
+      "weight": 700,
+      "size": 13
+    },
+    "button": {
+      "font": "body",
+      "weight": 600,
+      "size": 13,
+      "transform": "uppercase"
+    }
+  },
+  "radius": {
+    "pill": 100,
+    "card": 10,
+    "input": 6
+  },
+  "space": [
+    4,
+    8,
+    12,
+    16,
+    20,
+    24,
+    32,
+    48,
+    64
+  ]
+}

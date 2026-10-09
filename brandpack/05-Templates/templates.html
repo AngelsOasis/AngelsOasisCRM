@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Angels Oasis — layout templates</title>
+<link rel="stylesheet" href="../06-For-Claude/angels-oasis-tokens.css">
+<style>
+/* Each .artboard is a fixed-size layout. Edit the text, swap the photo, export at the stated size. */
+body{margin:0;padding:40px;background:#d9d6d2;display:flex;flex-direction:column;gap:40px;align-items:flex-start;font-family:var(--ao-font-body)}
+.artboard{position:relative;overflow:hidden;flex:none;box-sizing:border-box}
+.artboard *{box-sizing:border-box;margin:0}
+.fr{font-family:var(--ao-font-display)}
+.photo{background-size:cover;background-position:center}
+
+/* A — Instagram portrait 1080x1350, brand statement */
+#ig-brand{width:1080px;height:1350px;background:var(--ao-plum);color:var(--ao-cream);display:flex;flex-direction:column}
+#ig-brand .photo{height:700px;background-image:url(../04-Website-Photos/care-conversation-hero.jpg);background-position:60% 30%}
+#ig-brand .txt{flex:1;padding:56px 72px 64px;display:flex;flex-direction:column}
+#ig-brand .lead{font:300 38px/1.25 var(--ao-font-display);letter-spacing:-.5px}
+#ig-brand h1{font:600 84px/1.06 var(--ao-font-display);margin-top:14px}
+#ig-brand .foot{margin-top:auto;display:flex;justify-content:space-between;align-items:flex-end}
+#ig-brand .foot img{width:420px}
+.pill-lg{display:inline-block;border-radius:100px;background:var(--ao-sage);color:var(--ao-forest-deep);font:600 26px/1 var(--ao-font-body);text-transform:uppercase;padding:28px 40px;letter-spacing:.02em}
+
+/* B — Instagram portrait 1080x1350, service spotlight */
+#ig-service{width:1080px;height:1350px;background:var(--ao-cream);color:var(--ao-body);padding:80px 72px 64px;display:flex;flex-direction:column}
+.eyebrow-lg{display:flex;align-items:center;gap:18px;font:700 28px/1 var(--ao-font-body);color:var(--ao-charcoal)}
+.eyebrow-lg img{width:64px}
+#ig-service h1{font:300 92px/1.08 var(--ao-font-display);color:var(--ao-ink);margin-top:36px;letter-spacing:-1px}
+#ig-service p{font:400 34px/1.5 var(--ao-font-body);margin-top:32px;max-width:860px}
+#ig-service .row{display:flex;gap:28px;margin-top:56px;height:540px}
+#ig-service .row .photo{flex:1.25;border-radius:24px;background-image:url(../04-Website-Photos/physical-therapy-walker.jpg);background-position:50% 20%}
+#ig-service .facts{flex:1;background:var(--ao-sage-light);border-radius:24px;padding:36px;display:flex;flex-direction:column;justify-content:space-between;color:var(--ao-forest-deep)}
+#ig-service .facts div{font:600 34px/1.2 var(--ao-font-display)}
+#ig-service .facts hr{border:0;border-top:1px solid rgba(24,41,28,.25)}
+#ig-service .foot{margin-top:auto;display:flex;justify-content:space-between;align-items:center}
+#ig-service .foot img{width:400px}
+#ig-service .foot span{font:600 34px/1 var(--ao-font-display);color:var(--ao-plum)}
+
+/* C — Square testimonial 1080x1080 */
+#ig-testimonial{width:1080px;height:1080px;background:var(--ao-plum-deep);color:var(--ao-cream);padding:88px 80px 72px;display:flex;flex-direction:column}
+#ig-testimonial .stars{color:var(--ao-gold);font-size:44px;letter-spacing:8px}
+#ig-testimonial blockquote{font:300 62px/1.25 var(--ao-font-display);margin-top:44px;letter-spacing:-.5px}
+#ig-testimonial .who{margin-top:44px;font:600 30px/1.3 var(--ao-font-body)}
+#ig-testimonial .who small{display:block;font-weight:400;font-size:26px;color:var(--ao-sage)}
+#ig-testimonial .foot{margin-top:auto;display:flex;justify-content:space-between;align-items:flex-end}
+#ig-testimonial .foot img{width:380px}
+#ig-testimonial .foot span{font:400 24px/1 var(--ao-font-body);color:var(--ao-sage)}
+
+/* D — LinkedIn / Facebook cover 1584x396 (keep the lower-left 400px clear for the profile photo) */
+#li-banner{width:1584px;height:396px;background:var(--ao-plum);color:var(--ao-cream);display:flex;align-items:center;padding:0 72px 0 440px;gap:64px}
+#li-banner .mid{flex:1}
+#li-banner .mid img{width:330px;display:block}
+#li-banner h1{font:600 46px/1.1 var(--ao-font-display);margin-top:26px}
+.refer{background:#fff;border-radius:24px;overflow:hidden;width:380px;color:var(--ao-body);flex:none}
+.refer .top{background:var(--ao-sage-light);padding:26px 28px;text-align:center}
+.refer .top b{display:block;font:700 34px/1.2 var(--ao-font-display);color:var(--ao-plum);letter-spacing:-.5px}
+.refer .top span{font:700 30px/1.3 var(--ao-font-display);color:var(--ao-plum)}
+.refer .bot{padding:20px 28px;font:400 17px/1.5 var(--ao-font-body);text-align:center}
+
+/* E — Email header 1200x400 */
+#email-header{width:1200px;height:400px;display:flex;background:var(--ao-plum);color:var(--ao-cream)}
+#email-header .l{width:560px;padding:52px 56px;display:flex;flex-direction:column;justify-content:space-between}
+#email-header .l img{width:300px}
+#email-header h1{font:600 38px/1.1 var(--ao-font-display)}
+#email-header .photo{flex:1;background-image:url(../04-Website-Photos/private-room-banner.jpg);background-position:30% 50%}
+
+/* F — Business card 1050x600 (3.5 x 2 in at 300 dpi), front and back */
+#card-front{width:1050px;height:600px;background:var(--ao-plum);display:flex;align-items:center;justify-content:center}
+#card-front img{width:640px}
+#card-back{width:1050px;height:600px;background:var(--ao-cream);color:var(--ao-body);display:flex;flex-direction:column}
+#card-back .in{flex:1;padding:64px 72px 0;display:flex;justify-content:space-between}
+#card-back h2{font:600 46px/1.1 var(--ao-font-display);color:var(--ao-plum)}
+#card-back .role{font:400 24px/1.4 var(--ao-font-body);color:var(--ao-gray);margin-top:8px}
+#card-back .mk{width:150px;align-self:flex-start}
+#card-back dl{padding:0 72px 44px;font:400 24px/1.6 var(--ao-font-body)}
+#card-back dl div{display:flex;gap:16px}
+#card-back dt{width:36px;font-weight:700;color:var(--ao-forest)}
+#card-back .band{height:28px;background:var(--ao-sage)}
+</style></head><body>
+
+<div class="artboard" id="ig-brand" data-size="1080x1350">
+  <div class="photo"></div>
+  <div class="txt">
+    <p class="lead">Are you looking for a patient-first approach?</p>
+    <h1>Home-Like Care.<br>Hospital-Level Expertise.</h1>
+    <div class="foot"><img src="../01-Logos/svg/angels-oasis-logo-reversed.svg" alt="Angels Oasis"><span class="pill-lg">Schedule a Visit</span></div>
+  </div>
+</div>
+
+<div class="artboard" id="ig-service" data-size="1080x1350">
+  <div class="eyebrow-lg"><img src="../01-Logos/svg/angels-oasis-mark-mauve-deep.svg" alt="">Services</div>
+  <h1>24-Hour Skilled Nursing</h1>
+  <p>Round-the-clock nursing care for medically fragile and high-acuity residents.</p>
+  <div class="row">
+    <div class="photo"></div>
+    <div class="facts"><div>Staffing ratio 3:1</div><hr><div>6 private rooms with ensuite bathrooms</div><hr><div>24 hour care</div></div>
+  </div>
+  <div class="foot"><img src="../01-Logos/svg/angels-oasis-logo-positive.svg" alt="Angels Oasis"><span>(323) 213-2831</span></div>
+</div>
+
+<div class="artboard" id="ig-testimonial" data-size="1080x1080">
+  <div class="stars">★★★★★</div>
+  <blockquote>Every facility we toured felt cold and clinical. Angels Oasis was different from the first visit.</blockquote>
+  <p class="who">James Whitfield<small>Tarzana, CA</small></p>
+  <div class="foot"><img src="../01-Logos/svg/angels-oasis-logo-reversed.svg" alt="Angels Oasis"><span>angelsoasisclhf.com</span></div>
+</div>
+
+<div class="artboard" id="li-banner" data-size="1584x396">
+  <div class="mid"><img src="../01-Logos/svg/angels-oasis-logo-reversed.svg" alt="Angels Oasis"><h1>Home-Like Care.<br>Hospital-Level Expertise.</h1></div>
+  <div class="refer"><div class="top"><b>Refer a Patient</b><span>(323) 213-2831</span></div><div class="bot">We welcome patient referrals and are happy to discuss our services in more detail.</div></div>
+</div>
+
+<div class="artboard" id="email-header" data-size="1200x400">
+  <div class="l"><img src="../01-Logos/svg/angels-oasis-logo-reversed.svg" alt="Angels Oasis"><h1>Home-Like Care.<br>Hospital-Level Expertise.</h1></div>
+  <div class="photo"></div>
+</div>
+
+<div class="artboard" id="card-front" data-size="1050x600"><img src="../01-Logos/svg/angels-oasis-logo-reversed.svg" alt="Angels Oasis"></div>
+
+<div class="artboard" id="card-back" data-size="1050x600">
+  <div class="in"><div><h2>Full Name</h2><p class="role">Job Title</p></div><img class="mk" src="../01-Logos/svg/angels-oasis-mark-mauve-deep.svg" alt=""></div>
+  <dl><div><dt>T</dt><dd>(323) 213-2831</dd></div><div><dt>F</dt><dd>(323) 213-2832</dd></div><div><dt>E</dt><dd>admin@angelsoasisclhf.com</dd></div><div><dt>A</dt><dd>12018 Sarah St., Valley Village, CA 91607</dd></div></dl>
+  <div class="band"></div>
+</div>
+</body></html>

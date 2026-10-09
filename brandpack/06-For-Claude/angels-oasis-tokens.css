@@ -1,0 +1,72 @@
+/* Angels Oasis — brand tokens and base components.
+   Values are taken from angelsoasisclhf.com (October 2026). Font paths are relative to this file. */
+
+@font-face { font-family: "Fraunces"; src: url("../03-Fonts/fraunces-latin-full-normal.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Fraunces"; src: url("../03-Fonts/fraunces-latin-full-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("../03-Fonts/inter-latin-opsz-normal.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("../03-Fonts/inter-latin-wght-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; font-display: swap; }
+
+:root {
+  /* Core */
+  --ao-plum: #533841;         /* header, headings on light, app icon */
+  --ao-plum-deep: #36272C;    /* testimonial cards, deepest ground */
+  --ao-forest: #3F6950;       /* primary buttons, links, accents on light */
+  --ao-forest-deep: #18291C;  /* text on sage */
+  --ao-sage: #A9CBB7;         /* secondary button, pills, bands */
+  --ao-sage-light: #C9DED2;   /* soft panels */
+  --ao-cream: #FBF5F0;        /* text on plum, warm page ground */
+  --ao-linen: #EEEBE7;        /* section ground */
+  --ao-white: #FFFFFF;
+
+  /* Supporting */
+  --ao-mauve: #9F7785;        /* logo mark on plum */
+  --ao-mauve-deep: #8F6170;   /* logo mark and icons on light */
+  --ao-fern: #7EA686;         /* decorative green, large text on plum only */
+  --ao-ivory: #F5F1E8;        /* logo wordmark on plum */
+  --ao-taupe: #C4B9AB;        /* app icon mark */
+  --ao-gold: #E5A93C;         /* rating stars only */
+
+  /* Text */
+  --ao-ink: #222222;          /* headings */
+  --ao-body: #333333;         /* body copy */
+  --ao-charcoal: #3B3B3B;     /* footer ground, eyebrow labels */
+  --ao-gray: #616161;         /* secondary text */
+  --ao-hairline: #E7E5E4;     /* card and divider borders (site uses this at 60% opacity) */
+
+  /* Type */
+  --ao-font-display: "Fraunces", Georgia, Cambria, "Times New Roman", serif;
+  --ao-font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Shape and space */
+  --ao-radius-pill: 100px;    /* buttons, pills */
+  --ao-radius-card: 10px;     /* cards, photos */
+  --ao-radius-input: 6px;     /* form fields */
+  --ao-space-1: 4px; --ao-space-2: 8px; --ao-space-3: 12px; --ao-space-4: 16px;
+  --ao-space-5: 20px; --ao-space-6: 24px; --ao-space-8: 32px; --ao-space-12: 48px; --ao-space-16: 64px;
+}
+
+/* Type styles */
+.ao-display   { font: 600 42px/48px var(--ao-font-display); color: var(--ao-ink); }
+.ao-h2        { font: 300 40px/1.2 var(--ao-font-display); color: var(--ao-body); }
+.ao-h2-strong { font: 700 35px/1.25 var(--ao-font-display); letter-spacing: -0.5px; color: var(--ao-plum); }
+.ao-h3        { font: 600 18px/22.5px var(--ao-font-display); color: var(--ao-ink); }
+.ao-lead      { font: 300 20px/25px var(--ao-font-display); letter-spacing: -0.5px; color: var(--ao-body); }
+.ao-body      { font: 400 16px/26px var(--ao-font-body); color: var(--ao-body); }
+.ao-small     { font: 400 14px/20px var(--ao-font-body); color: var(--ao-body); }
+.ao-eyebrow   { font: 700 13px/1.2 var(--ao-font-body); color: var(--ao-charcoal); }
+.ao-nav       { font: 400 18px/1 var(--ao-font-display); text-transform: uppercase; }
+
+/* Buttons: pills, uppercase Inter */
+.ao-btn { display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: var(--ao-radius-pill);
+  padding: 15px 20px; font: 600 13px/1 var(--ao-font-body); letter-spacing: .02em; text-transform: uppercase; text-decoration: none; cursor: pointer; }
+.ao-btn--primary   { background: var(--ao-forest); color: var(--ao-white); }
+.ao-btn--secondary { background: var(--ao-sage); color: var(--ao-forest-deep); }
+.ao-btn--text      { background: none; padding-inline: 0; color: var(--ao-forest); text-decoration: underline; text-underline-offset: 4px; }
+
+/* Pills (payer types, tags) */
+.ao-pill { display: inline-block; border-radius: var(--ao-radius-pill); padding: 10px 24px; background: var(--ao-sage);
+  color: var(--ao-forest-deep); font: 600 14px/1 var(--ao-font-body); text-transform: uppercase; }
+
+/* Cards */
+.ao-card       { background: var(--ao-white); border: 1px solid var(--ao-hairline); border-radius: var(--ao-radius-card); padding: 20px; }
+.ao-card--dark { background: var(--ao-plum-deep); border: 0; color: var(--ao-cream); padding: 32px; }
