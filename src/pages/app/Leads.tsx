@@ -411,7 +411,9 @@ export default function Leads() {
             {visibleLeads.map((lead) => (
               <tr key={lead.id}>
                 <td className="px-4 py-3 font-medium">{lead.facility_name}</td>
-                <td className="px-4 py-3 capitalize">{lead.category.replaceAll("_", " ")}</td>
+                <td className="px-4 py-3">
+                  {LEAD_CATEGORIES.find((category) => category.value === lead.category)?.label ?? lead.category}
+                </td>
                 <td className="px-4 py-3">
                   {lead.contact_person || "—"}
                   {lead.email && <span className="block text-xs text-plum/50">{lead.email}</span>}
