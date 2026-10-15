@@ -27,6 +27,7 @@ import {
   type SearchMode,
 } from "../../lib/discovery";
 import { hostOf, isDirectoryHost, isOwnWebsite } from "../../../api/_lib/website-match";
+import LoadingScreen from "../../components/LoadingScreen";
 import {
   LEAD_CATEGORIES,
   type Facility,
@@ -295,6 +296,9 @@ export default function HospitalsMap() {
   const [addingAll, setAddingAll] = useState<{ done: number; total: number } | null>(null);
   const [locating, setLocating] = useState(false);
   const [message, setMessage] = useState<{ text: string; isError?: boolean } | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [refreshToken, setRefreshToken] = useState(0);
   const [colorBy, setColorBy] = useState<ColorBy>("type");
   const [visibleContacts, setVisibleContacts] = useState<Set<ContactLevel>>(
@@ -450,28 +454,52 @@ export default function HospitalsMap() {
   }
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
-      const [{ data: facilityRows }, { data: bedRows }] = await Promise.all([
-        supabase.from("facilities").select("*"),
-        supabase.from("facility_bed_availability").select("*"),
-      ]);
-      // Open facilities first so the flagship is the default selection;
-      // locations without a map position can't be a search center.
-      const allFacilities = ((facilityRows as Facility[]) ?? []).sort(
-        (a, b) =>
-          Number(a.latitude == null) - Number(b.latitude == null) ||
-          Number(a.status !== "open") - Number(b.status !== "open")
-      );
-      setFacilities(allFacilities);
-      setSelectedFacility(allFacilities[0]?.id ?? "");
-      setBedAvailability(
-        Object.fromEntries(((bedRows as FacilityBedAvailability[]) ?? []).map((b) => [b.facility_id, b]))
-      );
+      setInitialLoading(true);
+      setInitialLoadError(null);
+      try {
+        const [facilityResult, bedResult, leadResult] = await Promise.all([
+          supabase.from("facilities").select("*"),
+          supabase.from("facility_bed_availability").select("*"),
+          supabase.from("leads").select("*"),
+        ]);
+        if (facilityResult.error) throw new Error(`Couldn't load facilities: ${facilityResult.error.message}`);
+        if (bedResult.error) throw new Error(`Couldn't load bed availability: ${bedResult.error.message}`);
+        if (leadResult.error) throw new Error(`Couldn't load leads: ${leadResult.error.message}`);
+        if (cancelled) return;
+
+        // Open facilities first so the flagship is the default selection;
+        // locations without a map position can't be a search center.
+        const allFacilities = ((facilityResult.data as Facility[]) ?? []).sort(
+          (a, b) =>
+            Number(a.latitude == null) - Number(b.latitude == null) ||
+            Number(a.status !== "open") - Number(b.status !== "open")
+        );
+        setFacilities(allFacilities);
+        setSelectedFacility(allFacilities[0]?.id ?? "");
+        setBedAvailability(
+          Object.fromEntries(((bedResult.data as FacilityBedAvailability[]) ?? []).map((b) => [b.facility_id, b]))
+        );
+        setLeads((leadResult.data as Lead[]) ?? []);
+      } catch (error) {
+        if (!cancelled) {
+          setInitialLoadError(error instanceof Error ? error.message : "The Hospitals Map couldn't load. Please try again.");
+        }
+      } finally {
+        if (!cancelled) setInitialLoading(false);
+      }
     }
     load();
-    loadLeads();
-    getIntegrationStatus().then((status) => setGoogleAvailable(Boolean(status?.keys.google_places_api_key?.configured)));
-  }, []);
+    getIntegrationStatus()
+      .then((status) => {
+        if (!cancelled) setGoogleAvailable(Boolean(status?.keys.google_places_api_key?.configured));
+      })
+      .catch((error: unknown) => console.error("Couldn't load integration status:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAttempt]);
 
   const center = useMemo<[number, number]>(() => {
     const f = facilities.find((f) => f.id === selectedFacility);
@@ -850,6 +878,24 @@ export default function HospitalsMap() {
   }
 
   const isPreset = (RADII as readonly number[]).includes(radius);
+
+  if (initialLoading) return <LoadingScreen message="Loading Hospitals Map…" />;
+
+  if (initialLoadError) {
+    return (
+      <div className="mx-auto mt-16 max-w-lg rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm">
+        <h1 className="font-serif text-2xl text-plum">Hospitals Map couldn't load</h1>
+        <p role="alert" className="mt-3 text-sm text-red-700">{initialLoadError}</p>
+        <button
+          type="button"
+          className="btn-primary mt-6"
+          onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div>
