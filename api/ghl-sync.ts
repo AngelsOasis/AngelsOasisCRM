@@ -102,8 +102,22 @@ async function resolveWebhookUrl(request: ApiRequest): Promise<WebhookLookup> {
 // "skilled_nursing_facility" -> "Skilled Nursing Facility", for readable GHL fields and tags.
 function label(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
+  if (value.trim() === "ltac") return "LTAC";
   return value.trim().split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
 }
+
+// App lead status -> stage in the GHL "Angels Oasis Lead Generation" pipeline,
+// plus the matching opportunity status and contact tag.
+const PIPELINE_STAGES: Record<string, { stage: string; outcome: "open" | "won" | "lost"; tag: string }> = {
+  new: { stage: "New Lead", outcome: "open", tag: "stage-new-lead" },
+  researched: { stage: "New Lead", outcome: "open", tag: "stage-new-lead" },
+  contacted: { stage: "Contacted", outcome: "open", tag: "stage-contacted" },
+  engaged: { stage: "Proposal Sent", outcome: "open", tag: "stage-proposal-sent" },
+  referral_received: { stage: "Proposal Sent", outcome: "open", tag: "stage-proposal-sent" },
+  active_partner: { stage: "Closed", outcome: "won", tag: "stage-closed-won" },
+  dormant: { stage: "Closed", outcome: "lost", tag: "stage-closed-lost" },
+  do_not_contact: { stage: "Closed", outcome: "lost", tag: "stage-closed-lost" },
+};
 
 // Extra variables for the GHL Create/Update Contact mapping, added to every lead:
 // first/last name split from contact_person (so GHL doesn't show "SCP 1 1"),
@@ -113,6 +127,7 @@ function label(value: unknown): string | null {
 function withGhlFields(payload: LeadPayload, test: boolean): LeadPayload {
   const fullName = typeof payload.contact_person === "string" ? payload.contact_person.trim().replace(/\s+/g, " ") : "";
   const [firstName = "", ...rest] = fullName ? fullName.split(" ") : [];
+  const pipeline = PIPELINE_STAGES[String(payload.status)] ?? PIPELINE_STAGES.new;
   return {
     ...payload,
     full_name: fullName || null,
@@ -121,6 +136,10 @@ function withGhlFields(payload: LeadPayload, test: boolean): LeadPayload {
     category_label: label(payload.category),
     status_label: label(payload.status),
     source_label: label(payload.source),
+    pipeline_stage: pipeline.stage,
+    opportunity_status: pipeline.outcome,
+    stage_tag: pipeline.tag,
+    opportunity_name: [payload.facility_name, fullName].filter(Boolean).join(" — ") || null,
     source_app: "angels_oasis",
     ...(test ? { test: "true" } : {}),
   };

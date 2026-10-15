@@ -1,6 +1,7 @@
 export type LeadCategory =
   | "hospital"
   | "skilled_nursing_facility"
+  | "ltac"
   | "rehab_center"
   | "case_manager"
   | "discharge_planner"
@@ -11,6 +12,7 @@ export type LeadCategory =
 export const LEAD_CATEGORIES: { value: LeadCategory; label: string }[] = [
   { value: "hospital", label: "Hospital" },
   { value: "skilled_nursing_facility", label: "Skilled Nursing Facility" },
+  { value: "ltac", label: "Long-Term Acute Care (LTAC)" },
   { value: "rehab_center", label: "Rehab Center" },
   { value: "case_manager", label: "Case Manager" },
   { value: "discharge_planner", label: "Discharge Planner" },

@@ -38,12 +38,13 @@ const RADII = [5, 10, 25, 50] as const;
 const MAX_RADIUS = 100;
 const DEFAULT_CENTER: [number, number] = [34.1614, -118.3942];
 
-// Marker groups: red hospitals, purple SNFs, teal rehab centers / partners.
-type Group = "hospital" | "snf" | "rehab" | "partner";
+// Marker groups: red hospitals, purple SNFs, orange LTACs, teal rehab centers / partners.
+type Group = "hospital" | "snf" | "ltac" | "rehab" | "partner";
 
 const GROUPS: { id: Group; label: string; color: string }[] = [
   { id: "hospital", label: "Hospitals", color: "#DC2626" },
   { id: "snf", label: "Skilled Nursing", color: "#7C3AED" },
+  { id: "ltac", label: "LTAC", color: "#EA580C" },
   { id: "rehab", label: "Rehab Centers", color: "#0D9488" },
   { id: "partner", label: "Hospice, Home Health & Clinics", color: "#2DD4BF" },
 ];
@@ -53,6 +54,7 @@ const GROUP_COLOR = Object.fromEntries(GROUPS.map((g) => [g.id, g.color])) as Re
 function groupOf(category: LeadCategory): Group {
   if (category === "hospital") return "hospital";
   if (category === "skilled_nursing_facility") return "snf";
+  if (category === "ltac") return "ltac";
   if (category === "rehab_center") return "rehab";
   return "partner";
 }
@@ -82,8 +84,8 @@ type ContactLookup =
   | { status: "done"; info: ContactInfo }
   | { status: "error"; error: string };
 
-// v2: results now include people and web-search status.
-const CONTACT_CACHE_KEY = "hospitalsMap.contacts.v2";
+// v3: drops results that took a directory site (and its emails) as the facility's own.
+const CONTACT_CACHE_KEY = "hospitalsMap.contacts.v3";
 const BATCH_SIZE = 50;
 
 function loadContactCache(): Record<string, ContactLookup> {
@@ -261,11 +263,12 @@ export default function HospitalsMap() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchNotice, setSearchNotice] = useState<string | null>(null);
   // Partners (thousands of hospices/home health agencies at larger radii) start hidden.
-  const [visibleGroups, setVisibleGroups] = useState<Set<Group>>(new Set(["hospital", "snf", "rehab"]));
+  const [visibleGroups, setVisibleGroups] = useState<Set<Group>>(new Set(["hospital", "snf", "ltac", "rehab"]));
   const [selection, setSelection] = useState<Selection>(null);
   const [enriched, setEnriched] = useState<Record<string, { address: string | null; county: string | null }>>({});
   const [outreach, setOutreach] = useState<OutreachEmail[] | null>(null);
   const [adding, setAdding] = useState(false);
+  const [addingAll, setAddingAll] = useState<{ done: number; total: number } | null>(null);
   const [locating, setLocating] = useState(false);
   const [message, setMessage] = useState<{ text: string; isError?: boolean } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -541,7 +544,7 @@ export default function HospitalsMap() {
   );
 
   const groupCounts = useMemo(() => {
-    const counts: Record<Group, number> = { hospital: 0, snf: 0, rehab: 0, partner: 0 };
+    const counts: Record<Group, number> = { hospital: 0, snf: 0, ltac: 0, rehab: 0, partner: 0 };
     for (const c of newCandidates) counts[groupOf(c.category)]++;
     return counts;
   }, [newCandidates]);
@@ -712,6 +715,57 @@ export default function HospitalsMap() {
     });
   }
 
+  // Adds every facility currently shown on the map as a lead. Uses contact info
+  // already found, without new website scans (those run per lead when opened).
+  async function addAllShown() {
+    const queue = [...shownCandidates];
+    if (!queue.length) return;
+    if (!confirm(`Add all ${queue.length} shown facilit${queue.length === 1 ? "y" : "ies"} to Leads?`)) return;
+    setMessage(null);
+    setAddingAll({ done: 0, total: queue.length });
+    const added: Lead[] = [];
+    let failure: string | null = null;
+    for (let start = 0; start < queue.length; start += 200) {
+      const rows = queue.slice(start, start + 200).map((candidate) => {
+        const contact = candidateContacts(candidate);
+        const lookup = contacts[candidate.key];
+        const person = lookup?.status === "done" ? lookup.info.people?.[0] : undefined;
+        const nearest = nearestFacility(facilities, candidate.latitude, candidate.longitude);
+        return {
+          facility_name: candidate.name,
+          address: candidate.address,
+          county: candidate.county,
+          latitude: candidate.latitude,
+          longitude: candidate.longitude,
+          phone: contact.phone,
+          email: contact.email,
+          contact_person: person ? `${person.name} (${person.title})` : null,
+          website: contact.website,
+          category: candidate.category,
+          place_id: candidate.key,
+          nearest_facility_id: nearest?.facility.id ?? null,
+          distance_miles: nearest ? Math.round(nearest.miles * 100) / 100 : null,
+          status: "new",
+          source: "map_discovery",
+        };
+      });
+      const { data, error } = await supabase.from("leads").insert(rows).select();
+      if (error) {
+        failure = error.message;
+        break;
+      }
+      added.push(...((data as Lead[]) ?? []));
+      setAddingAll({ done: added.length, total: queue.length });
+    }
+    setLeads((prev) => [...added, ...prev]);
+    setAddingAll(null);
+    setMessage(
+      failure
+        ? { text: `Added ${added.length} of ${queue.length} facilities, then stopped: ${failure}`, isError: true }
+        : { text: `Added ${added.length} facilit${added.length === 1 ? "y" : "ies"} to Leads.` }
+    );
+  }
+
   async function locateLeads() {
     setLocating(true);
     setMessage(null);
@@ -741,7 +795,7 @@ export default function HospitalsMap() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-serif text-3xl">Hospitals Map</h1>
-          <p className="mt-1 text-plum/60">Nearby hospitals, SNFs, rehab centers, and healthcare partners.</p>
+          <p className="mt-1 text-plum/60">Nearby hospitals, SNFs, LTACs, rehab centers, and healthcare partners.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <select className="rounded-lg border border-plum/20 px-3 py-2 text-sm"
@@ -816,6 +870,16 @@ export default function HospitalsMap() {
             {g.label} <span className="text-plum/40">({groupCounts[g.id]})</span>
           </label>
         ))}
+        <span className="ml-auto">
+          {addingAll ? (
+            <span className="text-plum/70">Adding leads… {addingAll.done} of {addingAll.total}</span>
+          ) : (
+            <button className="btn-primary px-3 py-1 text-sm" disabled={searching || shownCandidates.length === 0}
+              onClick={addAllShown} title="Adds every facility currently shown on the map to Leads">
+              Add All Leads ({shownCandidates.length})
+            </button>
+          )}
+        </span>
       </fieldset>
 
       <fieldset className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-plum/10 px-3 py-2 text-sm">

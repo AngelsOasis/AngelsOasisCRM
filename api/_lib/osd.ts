@@ -105,6 +105,8 @@ const DIRECTORY_HOSTS = [
   "care.com", "rehabs.com", "recovery.com", "addictioncenter.com", "rehab.com", "psychologytoday.com",
   "healthline.com", "medicalnewstoday.com", "sharecare.com", "doctor.com", "agingcare.com",
   "payingforseniorcare.com", "seniorliving.org", "familyassets.com", "tripadvisor.com", "birdeye.com",
+  "recovered.org", "callongtermcarecompare.org", "carechanges.com", "senioradvisor.com", "assistedliving.org",
+  "caredash.com", "careindex.com", "rehabpath.com", "medicarelist.com", "hospitalsafetygrade.org",
 ];
 
 export function isDirectoryHost(host: string) {
@@ -137,16 +139,23 @@ export function nameMatch(name: string, text: string) {
 // and the result's title or domain must carry most of the facility name.
 export function pickWebsite(name: string, results: SearchResult[]) {
   for (const result of results) {
-    const host = hostOf(result.url);
-    if (!host || isDirectoryHost(host) || host.endsWith(".gov")) continue;
-    // Domains usually run words together ("shermanoakshospital.org").
-    const tokens = nameTokens(name);
-    const squashed = host.replace(/[^a-z0-9]/g, "");
-    const domainScore = tokens.length ? tokens.filter((token) => squashed.includes(token)).length / tokens.length : 0;
-    const score = Math.max(nameMatch(name, result.title), domainScore);
-    if (score >= 0.6) return new URL(result.url).origin + "/";
+    if (isOwnWebsite(name, result.url, result.title)) return new URL(result.url).origin + "/";
   }
   return null;
+}
+
+// Whether `url` is the facility's own site rather than a page about it.
+// Directory and review sites title their pages with the facility's name, so a
+// matching title alone isn't enough: the domain must carry the name too
+// ("shermanoakshospital.org"; domains usually run words together).
+export function isOwnWebsite(name: string, url: string, title = "") {
+  const host = hostOf(url);
+  if (!host || isDirectoryHost(host) || host.endsWith(".gov")) return false;
+  const tokens = nameTokens(name).filter((token) => token.length >= 3);
+  if (!tokens.length) return false;
+  const squashed = host.replace(/[^a-z0-9]/g, "");
+  const domainScore = tokens.filter((token) => squashed.includes(token)).length / tokens.length;
+  return domainScore >= 0.5 || (domainScore > 0 && nameMatch(name, title) >= 0.6);
 }
 
 // Referral-relevant roles to look for on websites and in search results.

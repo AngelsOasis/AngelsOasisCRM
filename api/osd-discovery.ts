@@ -1,8 +1,7 @@
 import {
   webSearch,
   webSearchConfigured,
-  hostOf,
-  isDirectoryHost,
+  isOwnWebsite,
   OSD_NOT_CONFIGURED,
   type SearchResult,
 } from "./_lib/osd.js";
@@ -18,7 +17,7 @@ interface ApiResponse {
   json(body: unknown): void;
 }
 
-type Category = "hospital" | "skilled_nursing_facility" | "rehab_center" | "healthcare_organization" | "physician";
+type Category = "hospital" | "skilled_nursing_facility" | "ltac" | "rehab_center" | "healthcare_organization" | "physician";
 
 interface Candidate {
   key: string;
@@ -34,7 +33,7 @@ interface Candidate {
   provider: "osd";
 }
 
-// Five searches plus rate-limited geocoding can take ~40 seconds.
+// Six searches plus rate-limited geocoding can take ~40 seconds.
 export const config = { maxDuration: 60 };
 
 const USER_AGENT = "AngelsOasisCRM/1.0 (facility discovery)";
@@ -48,6 +47,7 @@ const CACHE_LIMIT = 50;
 const SEARCHES: { category: Category; query: string; detail: string }[] = [
   { category: "hospital", query: "hospital", detail: "Hospital (OSD)" },
   { category: "skilled_nursing_facility", query: "skilled nursing facility", detail: "Skilled nursing (OSD)" },
+  { category: "ltac", query: "long term acute care hospital", detail: "Long-term acute care (OSD)" },
   { category: "rehab_center", query: "rehabilitation center", detail: "Rehab center (OSD)" },
   { category: "healthcare_organization", query: "hospice", detail: "Hospice (OSD)" },
   { category: "healthcare_organization", query: "home health agency", detail: "Home health (OSD)" },
@@ -164,13 +164,15 @@ export function leadsFrom(results: SearchResult[], category: Category, detail: s
     const address = text.match(ADDRESS_PATTERN)?.[0];
     const name = facilityName(result.title);
     if (!address || !name) continue;
-    const host = hostOf(result.url);
     const phone = text.match(PHONE_PATTERN)?.[0];
+    // A page about the facility on someone else's site isn't its website.
+    const ownSite = isOwnWebsite(name, result.url, result.title);
     leads.push({
       name,
       address: address.replace(/\s+/g, " ").trim(),
-      phone: phone ? formatPhone(phone) : null,
-      website: host && !isDirectoryHost(host) ? new URL(result.url).origin + "/" : null,
+      // A listing site's phone is usually its own call center, not the facility's.
+      phone: phone && ownSite ? formatPhone(phone) : null,
+      website: ownSite ? new URL(result.url).origin + "/" : null,
       category,
       detail,
       url: result.url,

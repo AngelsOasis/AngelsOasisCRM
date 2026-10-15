@@ -12,6 +12,7 @@ interface ApiResponse {
 type Category =
   | "hospital"
   | "skilled_nursing_facility"
+  | "ltac"
   | "rehab_center"
   | "physician"
   | "healthcare_organization";
@@ -81,7 +82,11 @@ function titleCase(value: string | null) {
   return value?.toLowerCase().replace(/\b[a-z]/g, (letter) => letter.toUpperCase()) ?? null;
 }
 
-function categoryFor(type: string): Category {
+// CDPH licenses LTAC hospitals as general acute care, so the name identifies them.
+const LTAC_NAME = /long[- ]?term acute|\bltach?\b|kindred hospital|vibra hospital|select specialty hospital/i;
+
+function categoryFor(type: string, name: string): Category {
+  if (LTAC_NAME.test(name)) return "ltac";
   if (/rehabilitation|physical therapy/i.test(type)) return "rehab_center";
   if (/hospital|psychiatric unit/i.test(type)) return "hospital";
   if (/skilled nursing|intermediate care|congregate living/i.test(type)) return "skilled_nursing_facility";
@@ -112,7 +117,7 @@ function toCandidate(feature: ArcGisFeature): Candidate | null {
     longitude,
     phone: text(attributes.CONTACT_PHONE_NUMBER),
     website: null,
-    category: categoryFor(type ?? name),
+    category: categoryFor(type ?? name, name),
     detail: type,
     provider: "cdph",
   };

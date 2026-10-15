@@ -13,6 +13,7 @@ import {
   webSearch,
   webSearchConfigured,
   hostOf,
+  isDirectoryHost,
   peopleFromLinkedInResults,
   peopleFromText,
   pickWebsite,
@@ -294,7 +295,11 @@ function extractContacts(html: string) {
   phones.push(...(text.match(PHONE_PATTERN) ?? []));
 
   return {
-    emails: emails.map((email) => email.trim().toLowerCase()).filter((email) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(email) && !IGNORED_EMAIL.test(email)),
+    emails: emails
+      .map((email) => email.trim().toLowerCase())
+      .filter((email) =>
+        /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(email) && !IGNORED_EMAIL.test(email) && !isDirectoryHost(email.split("@")[1])
+      ),
     phones: phones.map(formatPhone).filter((phone): phone is string => phone != null),
   };
 }
@@ -420,8 +425,11 @@ function errorText(error: unknown) {
 }
 
 async function enrich(facility: FacilityInput): Promise<Enrichment> {
+  // A directory page saved as the website (older OSD results did this) would
+  // be scanned for the directory's own contacts, so start without it.
+  const givenWebsite = normalizeWebsite(facility.website);
   const result: Enrichment = {
-    website: normalizeWebsite(facility.website),
+    website: givenWebsite && !isDirectoryHost(hostOf(givenWebsite)) ? givenWebsite : null,
     phone: facility.phone ? formatPhone(facility.phone) ?? facility.phone : null,
     email: null,
     emails: [],

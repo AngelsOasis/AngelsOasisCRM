@@ -72,8 +72,13 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus | null> 
   return data as IntegrationStatus;
 }
 
+// LTAC hospitals are licensed as general acute care hospitals, so only the
+// name or a speciality tag tells them apart.
+const LTAC_PATTERN = /long[- ]?term acute|\bltach?\b|kindred hospital|vibra hospital|select specialty hospital/i;
+
 function candidateCategory(tags: Record<string, string>): LeadCategory {
   const value = `${tags.amenity ?? ""} ${tags.healthcare ?? ""} ${tags.operator ?? ""}`.toLowerCase();
+  if (LTAC_PATTERN.test(`${tags.name ?? ""} ${tags["healthcare:speciality"] ?? ""}`)) return "ltac";
   if (value.includes("hospital")) return "hospital";
   if (value.includes("nursing") || value.includes("care_home")) return "skilled_nursing_facility";
   if (value.includes("rehab")) return "rehab_center";
