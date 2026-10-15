@@ -10,6 +10,7 @@ export type SearchMode = DiscoveryProvider | "all";
 
 export interface Candidate {
   key: string;
+  contactKeys?: string[];
   name: string;
   address: string | null;
   county: string | null;
@@ -337,7 +338,7 @@ export function mergeCandidates(lists: Candidate[][]): Candidate[] {
         }
       }
       if (!match) {
-        const entry = { ...candidate, sources: [candidate.provider] };
+        const entry = { ...candidate, contactKeys: [candidate.key], sources: [candidate.provider] };
         merged.push(entry);
         const key = `${row}:${column}`;
         grid.set(key, [...(grid.get(key) ?? []), entry]);
@@ -347,6 +348,8 @@ export function mergeCandidates(lists: Candidate[][]): Candidate[] {
       match.website ??= candidate.website;
       match.address ??= candidate.address;
       match.county ??= candidate.county;
+      match.contactKeys ??= [match.key];
+      if (!match.contactKeys.includes(candidate.key)) match.contactKeys.push(candidate.key);
       match.sources = [...(match.sources ?? []), candidate.provider];
     }
   }

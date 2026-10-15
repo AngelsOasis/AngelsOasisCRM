@@ -26,6 +26,7 @@ import {
   type ContactSource,
   type SearchMode,
 } from "../../lib/discovery";
+import { hostOf, isDirectoryHost, isOwnWebsite } from "../../../api/_lib/website-match";
 import {
   LEAD_CATEGORIES,
   type Facility,
@@ -84,17 +85,39 @@ type ContactLookup =
   | { status: "done"; info: ContactInfo }
   | { status: "error"; error: string };
 
-// v3: drops results that took a directory site (and its emails) as the facility's own.
+// v2 results are migrated; provider-specific keys remain usable for merged
+// candidates through Candidate.contactKeys.
 const CONTACT_CACHE_KEY = "hospitalsMap.contacts.v3";
+const OLD_CONTACT_CACHE_KEY = "hospitalsMap.contacts.v2";
 const BATCH_SIZE = 50;
 
 function loadContactCache(): Record<string, ContactLookup> {
   try {
-    const saved = JSON.parse(localStorage.getItem(CONTACT_CACHE_KEY) ?? "{}") as Record<string, ContactInfo>;
+    const saved = {
+      ...(JSON.parse(localStorage.getItem(OLD_CONTACT_CACHE_KEY) ?? "{}") as Record<string, ContactInfo>),
+      ...(JSON.parse(localStorage.getItem(CONTACT_CACHE_KEY) ?? "{}") as Record<string, ContactInfo>),
+    };
     return Object.fromEntries(Object.entries(saved).map(([key, info]) => [key, { status: "done", info }]));
   } catch {
     return {};
   }
+}
+
+// Contacts found for a facility, minus anything from directory sites. Returns
+// null when the website itself was a directory page: everything scanned from
+// it is the directory's, so the facility should be looked up again.
+function relevantContacts(name: string, info: ContactInfo): ContactInfo | null {
+  if (info.website) {
+    const host = hostOf(info.website);
+    if (isDirectoryHost(host)) return null;
+    if (info.sources.website === "web_search" && !isOwnWebsite(name, info.website)) return null;
+  }
+  const emails = info.emails.filter((email) => !isDirectoryHost(email.split("@")[1] ?? ""));
+  if (emails.length === info.emails.length && (!info.email || !isDirectoryHost(info.email.split("@")[1] ?? ""))) {
+    return info;
+  }
+  const email = info.email && emails.includes(info.email) ? info.email : null;
+  return { ...info, emails, email, sources: { ...info.sources, email: email ? info.sources.email : null } };
 }
 
 function saveContactCache(lookups: Record<string, ContactLookup>) {
@@ -103,6 +126,7 @@ function saveContactCache(lookups: Record<string, ContactLookup>) {
       lookup.status === "done" && !key.startsWith("lead:") ? [[key, lookup.info] as const] : []
     );
     localStorage.setItem(CONTACT_CACHE_KEY, JSON.stringify(Object.fromEntries(done)));
+    localStorage.removeItem(OLD_CONTACT_CACHE_KEY);
   } catch {
     // Storage unavailable (private mode, quota) — results just won't persist.
   }
@@ -289,6 +313,40 @@ export default function HospitalsMap() {
 
   useEffect(() => saveContactCache(contacts), [contacts]);
 
+  // Clean saved lookups for the facilities found: drop directory-site
+  // results (so they're looked up again) and directory emails.
+  useEffect(() => {
+    setContacts((prev) => {
+      let next: Record<string, ContactLookup> | null = null;
+      for (const c of candidates) {
+        let bestInfo: ContactInfo | null = null;
+        for (const key of new Set([c.key, ...(c.contactKeys ?? [])])) {
+          const lookup = prev[key];
+          if (lookup?.status !== "done") continue;
+          const info = relevantContacts(c.name, lookup.info);
+          if (!bestInfo && info) bestInfo = info;
+          if (info !== lookup.info) {
+            next ??= { ...prev };
+            if (info) next[key] = { status: "done", info };
+            else delete next[key];
+          }
+        }
+        if (bestInfo && !prev[c.key]) {
+          next ??= { ...prev };
+          next[c.key] = { status: "done", info: bestInfo };
+        }
+      }
+      return next ?? prev;
+    });
+  }, [candidates]);
+
+  function candidateLookup(c: Candidate, lookups = contacts): ContactLookup | undefined {
+    const matches = [...new Set([c.key, ...(c.contactKeys ?? [])])]
+      .map((key) => lookups[key])
+      .filter((lookup): lookup is ContactLookup => Boolean(lookup));
+    return matches.find((lookup) => lookup.status === "done") ?? matches[0];
+  }
+
   // Looks up a facility's website and scans it for email/phone. Concurrent
   // calls for the same key share one request.
   function lookupContacts(
@@ -318,7 +376,7 @@ export default function HospitalsMap() {
   }
 
   function candidateContacts(c: Candidate) {
-    const lookup = contacts[c.key];
+    const lookup = candidateLookup(c);
     const info = lookup?.status === "done" ? lookup.info : null;
     return {
       phone: c.phone ?? info?.phone ?? null,
@@ -558,7 +616,7 @@ export default function HospitalsMap() {
     return counts;
   }, [newCandidates, candidateLevels, visibleGroups]);
 
-  const unscannedShown = shownCandidates.filter((c) => !contacts[c.key]);
+  const unscannedShown = shownCandidates.filter((c) => !candidateLookup(c));
 
   const unlocatedLeads = useMemo(
     () => leads.filter((l) => (l.latitude == null || l.longitude == null) && l.address?.trim()),
@@ -589,7 +647,7 @@ export default function HospitalsMap() {
   // Find the website and scan it for email/phone as soon as a facility is opened.
   useEffect(() => {
     const c = selectedCandidateRaw;
-    if (!c || contacts[c.key]) return;
+    if (!c || candidateLookup(c)) return;
     lookupContacts(c.key, c);
   }, [selectedCandidateRaw]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -672,7 +730,10 @@ export default function HospitalsMap() {
 
     // Record the contact number, email, and website from the start: reuse the
     // lookup already made when the facility was opened, or run it now.
-    const info = await lookupContacts(candidate.key, candidate);
+    const cachedLookup = candidateLookup(candidate);
+    const info = cachedLookup?.status === "done"
+      ? cachedLookup.info
+      : await lookupContacts(candidate.key, candidate);
     const nearest = nearestFacility(facilities, candidate.latitude, candidate.longitude);
     const { data, error } = await supabase
       .from("leads")
@@ -728,7 +789,7 @@ export default function HospitalsMap() {
     for (let start = 0; start < queue.length; start += 200) {
       const rows = queue.slice(start, start + 200).map((candidate) => {
         const contact = candidateContacts(candidate);
-        const lookup = contacts[candidate.key];
+        const lookup = candidateLookup(candidate);
         const person = lookup?.status === "done" ? lookup.info.people?.[0] : undefined;
         const nearest = nearestFacility(facilities, candidate.latitude, candidate.longitude);
         return {
@@ -1036,7 +1097,7 @@ export default function HospitalsMap() {
               <hr className="my-2 border-plum/10" />
               <ContactDetails
                 {...candidateContacts(selectedCandidate)}
-                lookup={contacts[selectedCandidate.key]}
+                lookup={candidateLookup(selectedCandidate)}
                 givenSource={PROVIDER_LABEL[selectedCandidate.provider]}
                 onRescan={() => lookupContacts(selectedCandidate.key, selectedCandidateRaw!, true)}
               />
@@ -1046,7 +1107,7 @@ export default function HospitalsMap() {
               </p>
               <button className="btn-primary mt-2 w-full" disabled={adding} onClick={() => addAsLead(selectedCandidate)}>
                 {adding
-                  ? contacts[selectedCandidate.key]?.status === "loading" ? "Finding contact info…" : "Adding…"
+                  ? candidateLookup(selectedCandidate)?.status === "loading" ? "Finding contact info…" : "Adding…"
                   : "+ Add as Lead"}
               </button>
             </div>
