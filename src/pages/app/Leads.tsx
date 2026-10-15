@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Download, Search, Upload } from "lucide-react";
+import { Download, FileText, Search, Upload } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 import { leadLocationFields } from "../../lib/geo";
 import { LEAD_CATEGORIES, LEAD_STATUSES, type Facility, type Lead, type LeadCategory, type LeadStatus } from "../../lib/types";
@@ -33,6 +33,7 @@ export default function Leads() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("all");
+  const [categoryFilter, setCategoryFilter] = useState<LeadCategory | "all">("all");
   const [search, setSearch] = useState("");
   const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
   const [error, setError] = useState<string | null>(null);
@@ -40,25 +41,26 @@ export default function Leads() {
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.from("facilities").select("*").then(({ data }) => setFacilities((data as Facility[]) ?? []));
   }, []);
 
-  // Search and sort run in the browser on the loaded leads; CSV Export and
-  // Save to GHL use this same list, so they act on exactly what's shown.
+  // Search, category filtering, and sort run on loaded leads; exports and GHL
+  // sync use this same list, so they act on exactly what's shown.
   const visibleLeads = useMemo(() => {
     const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const matches = terms.length
-      ? leads.filter((lead) => {
-          const text = [
-            lead.facility_name, lead.contact_person, lead.email, lead.phone, lead.address,
-            lead.county, lead.department, lead.notes, lead.category.replaceAll("_", " "),
-          ].join(" ").toLowerCase();
-          return terms.every((term) => text.includes(term));
-        })
-      : leads;
-    return [...matches].sort((a, b) => {
+    const matches = leads.filter((lead) => {
+      const matchesCategory = categoryFilter === "all" || lead.category === categoryFilter;
+      const text = [
+        lead.facility_name, lead.contact_person, lead.email, lead.phone, lead.address,
+        lead.county, lead.department, lead.notes, lead.category.replaceAll("_", " "),
+      ].join(" ").toLowerCase();
+      const matchesSearch = terms.every((term) => text.includes(term));
+      return matchesCategory && matchesSearch;
+    });
+    return matches.sort((a, b) => {
       if (sortOrder === "az" || sortOrder === "za") {
         const byName = a.facility_name.localeCompare(b.facility_name, undefined, { sensitivity: "base", numeric: true });
         return sortOrder === "az" ? byName : -byName;
@@ -66,7 +68,7 @@ export default function Leads() {
       const byDate = a.created_at.localeCompare(b.created_at);
       return sortOrder === "oldest" ? byDate : -byDate;
     });
-  }, [leads, search, sortOrder]);
+  }, [leads, search, categoryFilter, sortOrder]);
 
   async function loadLeads() {
     setLoading(true);
@@ -196,6 +198,78 @@ export default function Leads() {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  function saveLeadsAsPDF() {
+    setExportError(null);
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      setExportError("Allow pop-ups for this site to save the lead list as a PDF.");
+      return;
+    }
+
+    const htmlEntities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    const escapeHtml = (value: string | null | undefined) =>
+      (value ?? "").replace(/[&<>"']/g, (character) => htmlEntities[character] ?? character);
+    const categoryLabel = (category: LeadCategory) =>
+      LEAD_CATEGORIES.find((item) => item.value === category)?.label ?? category;
+    const statusLabel = (status: LeadStatus) =>
+      LEAD_STATUSES.find((item) => item.value === status)?.label ?? status;
+    const rows = visibleLeads.map((lead) => `
+      <tr>
+        <td>${escapeHtml(lead.facility_name)}</td>
+        <td>${escapeHtml(categoryLabel(lead.category))}</td>
+        <td>${escapeHtml(lead.address)}</td>
+        <td>${escapeHtml(lead.county)}</td>
+        <td>${escapeHtml(lead.contact_person)}</td>
+        <td>${escapeHtml(lead.email)}</td>
+        <td>${escapeHtml(lead.phone)}</td>
+        <td>${escapeHtml(statusLabel(lead.status))}</td>
+        <td>${escapeHtml(lead.source.replaceAll("_", " "))}</td>
+        <td>${escapeHtml(lead.notes)}</td>
+      </tr>`).join("");
+    const reportTitle = "Angels Oasis Leads";
+    const filterSummary = [
+      `Category: ${categoryFilter === "all" ? "All categories" : categoryLabel(categoryFilter)}`,
+      `Status: ${statusFilter === "all" ? "All statuses" : statusLabel(statusFilter)}`,
+      search.trim() ? `Search: ${search.trim()}` : "",
+    ].filter(Boolean).map(escapeHtml).join(" | ");
+
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>${reportTitle}</title>
+          <style>
+            @page { size: landscape; margin: 12mm; }
+            body { color: #29212a; font: 10px Arial, sans-serif; }
+            h1 { margin: 0 0 6px; font-size: 20px; }
+            p { margin: 0 0 14px; color: #665b65; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #d8d1d6; padding: 5px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+            th { background: #f4eff2; font-size: 9px; }
+            tr { break-inside: avoid; }
+          </style>
+        </head>
+        <body>
+          <h1>${reportTitle}</h1>
+          <p>${filterSummary} | ${visibleLeads.length} lead${visibleLeads.length === 1 ? "" : "s"} | Exported ${new Date().toLocaleDateString()}</p>
+          <table>
+            <thead><tr><th>Facility</th><th>Category</th><th>Address</th><th>County</th><th>Contact</th><th>Email</th><th>Phone</th><th>Status</th><th>Source</th><th>Notes</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </body>
+      </html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  }
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -215,6 +289,15 @@ export default function Leads() {
           </button>
           <button
             type="button"
+            onClick={saveLeadsAsPDF}
+            disabled={loading || visibleLeads.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg border border-plum/20 px-4 py-2 text-sm font-medium text-plum transition-colors hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileText className="h-4 w-4" />
+            Save as PDF
+          </button>
+          <button
+            type="button"
             onClick={saveLeadsToGhl}
             disabled={loading || syncing || visibleLeads.length === 0}
             className="inline-flex items-center gap-2 rounded-lg border border-plum/20 px-4 py-2 text-sm font-medium text-plum transition-colors hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
@@ -229,6 +312,7 @@ export default function Leads() {
       </div>
 
       {syncMessage && <p className="mt-3 text-right text-sm text-plum/70">{syncMessage}</p>}
+      {exportError && <p role="alert" className="mt-3 text-right text-sm text-red-600">{exportError}</p>}
 
       {showForm && (
         <form onSubmit={handleSubmit} className="card mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -274,11 +358,19 @@ export default function Leads() {
           />
         </label>
         <label className="flex items-center gap-2">
-          <span className="text-sm text-plum/60">Filter:</span>
+          <span className="text-sm text-plum/60">Status:</span>
           <select className="rounded-lg border border-plum/20 px-2 py-1 text-sm"
             value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as LeadStatus | "all")}>
             <option value="all">All statuses</option>
             {LEAD_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-sm text-plum/60">Category:</span>
+          <select className="rounded-lg border border-plum/20 px-2 py-1 text-sm"
+            value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value as LeadCategory | "all")}>
+            <option value="all">All categories</option>
+            {LEAD_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
           </select>
         </label>
         <label className="flex items-center gap-2">
@@ -288,9 +380,9 @@ export default function Leads() {
             {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </label>
-        {!loading && search.trim() && (
+        {!loading && (search.trim() || categoryFilter !== "all") && (
           <span className="text-xs text-plum/50">
-            {visibleLeads.length} of {leads.length} lead{leads.length === 1 ? "" : "s"}
+            {visibleLeads.length} of {leads.length} leads
           </span>
         )}
       </div>
@@ -314,7 +406,7 @@ export default function Leads() {
               <tr><td className="px-4 py-6 text-plum/50" colSpan={7}>No leads yet — add one, import a CSV, or discover some on the Hospitals Map.</td></tr>
             )}
             {!loading && leads.length > 0 && visibleLeads.length === 0 && (
-              <tr><td className="px-4 py-6 text-plum/50" colSpan={7}>No leads match "{search.trim()}".</td></tr>
+              <tr><td className="px-4 py-6 text-plum/50" colSpan={7}>No leads match the selected filters.</td></tr>
             )}
             {visibleLeads.map((lead) => (
               <tr key={lead.id}>
