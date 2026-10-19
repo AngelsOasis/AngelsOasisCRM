@@ -33,7 +33,11 @@ drafts directly to the authenticated Supabase tables.
    `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` names; redeploy after changing environment variables.
 3. Apply the schema migrations in order: `supabase db push` (with the CLI linked), or run each
    `supabase/migrations/*.sql` file in order in the Supabase SQL editor. The campaign draft limit
-   migration adds the draft-library flag and enforces a maximum of 100 saved drafts for each genre.
+   migration adds the draft-library flag and enforces a maximum of 100 saved drafts for each genre,
+   and migration `0009_ltac_category.sql` adds **Long-Term Acute Care (LTAC)** as its own lead
+   category and includes it in the eligible campaign audience values (`hospital`, `skilled_nursing_facility`,
+   `ltac`, `rehab_center`, etc.). Migration `0010_lead_contact_linkedin.sql` stores each lead contact's
+   LinkedIn profile so the CSV and PDF exports can link the contact's name to it.
 4. Create a staff login: Authentication → Users → Add user (email + password). Then, in the SQL
    editor, give them a role:
    ```sql
@@ -60,7 +64,9 @@ required out of the box), the Campaign Writer (manual draft creation, stored in 
 100-draft-per-genre limit), the Campaigns page,
 Email Analytics (reads real `emails` rows), Dashboard KPIs, protected routing (every `/app/*` route
 redirects to `/app/login` when signed out), and `campaign-sender` (Brevo-backed direct/test sends,
-valid-email filtering, and suppression of unsubscribed/do-not-contact leads).
+valid-email filtering, and suppression of unsubscribed/do-not-contact leads). Lead types include
+**hospitals**, **skilled nursing facilities**, **LTACs**, and other healthcare audiences, with the
+campaign audience filter updated to include `ltac` as a first-class category.
 
 **Stubbed / next steps:**
 - **Unsubscribe automation:** the sender excludes leads already marked unsubscribed or do-not-contact.

@@ -55,6 +55,7 @@ export interface Lead {
   distance_miles: number | null;
   contact_person: string | null;
   contact_title: string | null;
+  contact_linkedin_url?: string | null;
   department: string | null;
   email: string | null;
   phone: string | null;

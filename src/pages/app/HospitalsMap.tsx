@@ -24,6 +24,7 @@ import {
   type Candidate,
   type ContactInfo,
   type ContactSource,
+  type FoundPerson,
   type SearchMode,
 } from "../../lib/discovery";
 import { hostOf, isDirectoryHost, isOwnWebsite } from "../../../api/_lib/website-match";
@@ -70,6 +71,13 @@ const candidateSegment = (c: Candidate) => segmentOf(c.category, c.name, c.opera
 const candidateNetwork = (c: Candidate) => networkOf(c.name, c.operator);
 const leadSegment = (l: Lead) => segmentOf(l.category, l.facility_name);
 const leadNetwork = (l: Lead) => networkOf(l.facility_name);
+
+// The contact's LinkedIn profile, saved on the lead for the CSV/PDF exports.
+// Saves retry without it while migration 0010 hasn't added the column yet.
+const linkedInField = (person: FoundPerson | undefined, include: boolean) =>
+  include && person?.source === "linkedin" && person.url ? { contact_linkedin_url: person.url } : {};
+const missingLinkedInColumn = (error: { message: string } | null) =>
+  Boolean(error?.message.includes("contact_linkedin_url"));
 
 function matchesQuery(query: string, ...texts: (string | null | undefined)[]) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -422,16 +430,24 @@ export default function HospitalsMap() {
   // Saves newly found contact details onto a lead, never overwriting values
   // someone already entered.
   async function saveLeadContacts(lead: Lead, info: ContactInfo) {
-    const updates: Partial<Pick<Lead, "phone" | "email" | "website" | "contact_person">> = {};
+    let updates: Partial<Pick<Lead, "phone" | "email" | "website" | "contact_person" | "contact_linkedin_url">> = {};
     if (!lead.phone && info.phone) updates.phone = info.phone;
     if (!lead.email && info.email) updates.email = info.email;
     if (!lead.website && info.website) updates.website = info.website;
     const people = info.people ?? [];
-    if (!lead.contact_person && people[0]) updates.contact_person = `${people[0].name} (${people[0].title})`;
+    if (!lead.contact_person && people[0]) {
+      updates.contact_person = `${people[0].name} (${people[0].title})`;
+      updates = { ...updates, ...linkedInField(people[0], true) };
+    }
 
     let saved = 0;
     if (Object.keys(updates).length) {
-      const { error } = await supabase.from("leads").update(updates).eq("id", lead.id);
+      let { error } = await supabase.from("leads").update(updates).eq("id", lead.id);
+      if (missingLinkedInColumn(error)) {
+        const { contact_linkedin_url: _, ...rest } = updates;
+        updates = rest;
+        ({ error } = await supabase.from("leads").update(updates).eq("id", lead.id));
+      }
       if (error) {
         setMessage({ text: `Couldn't save contact info for ${lead.facility_name}: ${error.message}`, isError: true });
         return 0;
@@ -675,33 +691,50 @@ export default function HospitalsMap() {
       visibleContacts.has(candidateLevels.get(c.key)!);
   });
 
+  // Every marker the map could draw (new facilities and existing leads) with
+  // the three attributes the legends filter on.
+  const markerKinds = useMemo(
+    () => [
+      ...searchedCandidates.map((c) => ({ ...candidateKinds.get(c.key)!, level: candidateLevels.get(c.key)! })),
+      ...leads
+        .filter(
+          (l) =>
+            l.latitude != null &&
+            l.longitude != null &&
+            inRadius(l.latitude, l.longitude) &&
+            matchesQuery(query, l.facility_name, l.address, l.contact_person)
+        )
+        .map((l) => ({ segment: leadSegment(l), network: leadNetwork(l), level: contactLevel(l) })),
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searchedCandidates, candidateKinds, candidateLevels, leads, center, radius, query]
+  );
+
+  // Each legend counts the markers that pass the other two legends' filters,
+  // so a checked box's count is exactly how many of its markers are on the map.
   const groupCounts = useMemo(() => {
     const counts = Object.fromEntries(GROUPS.map((g) => [g.id, 0])) as Record<Group, number>;
-    for (const c of searchedCandidates) {
-      const kind = candidateKinds.get(c.key)!;
-      if (visibleNetworks.has(kind.network)) counts[kind.segment]++;
+    for (const m of markerKinds) {
+      if (visibleNetworks.has(m.network) && visibleContacts.has(m.level)) counts[m.segment]++;
     }
     return counts;
-  }, [searchedCandidates, candidateKinds, visibleNetworks]);
+  }, [markerKinds, visibleNetworks, visibleContacts]);
 
   const networkCounts = useMemo(() => {
     const counts = Object.fromEntries(NETWORKS.map((n) => [n.id, 0])) as Record<Network, number>;
-    for (const c of searchedCandidates) {
-      const kind = candidateKinds.get(c.key)!;
-      if (visibleGroups.has(kind.segment)) counts[kind.network]++;
+    for (const m of markerKinds) {
+      if (visibleGroups.has(m.segment) && visibleContacts.has(m.level)) counts[m.network]++;
     }
     return counts;
-  }, [searchedCandidates, candidateKinds, visibleGroups]);
+  }, [markerKinds, visibleGroups, visibleContacts]);
 
-  // Contact counts cover the facility types and health systems currently shown.
   const contactCounts = useMemo(() => {
     const counts: Record<ContactLevel, number> = { email: 0, phone: 0, website: 0, none: 0 };
-    for (const c of searchedCandidates) {
-      const kind = candidateKinds.get(c.key)!;
-      if (visibleGroups.has(kind.segment) && visibleNetworks.has(kind.network)) counts[candidateLevels.get(c.key)!]++;
+    for (const m of markerKinds) {
+      if (visibleGroups.has(m.segment) && visibleNetworks.has(m.network)) counts[m.level]++;
     }
     return counts;
-  }, [searchedCandidates, candidateKinds, candidateLevels, visibleGroups, visibleNetworks]);
+  }, [markerKinds, visibleGroups, visibleNetworks]);
 
   const unscannedShown = shownCandidates.filter((c) => !candidateLookup(c));
 
@@ -831,7 +864,7 @@ export default function HospitalsMap() {
       ? cachedLookup.info
       : await lookupContacts(candidate.key, candidate);
     const nearest = nearestFacility(facilities, candidate.latitude, candidate.longitude);
-    const { data, error } = await supabase
+    const insertLead = (includeLinkedIn: boolean) => supabase
       .from("leads")
       .insert({
         facility_name: candidate.name,
@@ -842,6 +875,7 @@ export default function HospitalsMap() {
         phone: candidate.phone ?? info?.phone ?? null,
         email: info?.email ?? null,
         contact_person: info?.people?.[0] ? `${info.people[0].name} (${info.people[0].title})` : null,
+        ...linkedInField(info?.people?.[0], includeLinkedIn),
         website: candidate.website ?? info?.website ?? null,
         category: candidate.category,
         place_id: candidate.key,
@@ -852,6 +886,8 @@ export default function HospitalsMap() {
       })
       .select()
       .single();
+    let { data, error } = await insertLead(true);
+    if (missingLinkedInColumn(error)) ({ data, error } = await insertLead(false));
     setAdding(false);
 
     if (error) {
@@ -883,7 +919,7 @@ export default function HospitalsMap() {
     const added: Lead[] = [];
     let failure: string | null = null;
     for (let start = 0; start < queue.length; start += 200) {
-      const rows = queue.slice(start, start + 200).map((candidate) => {
+      const rows = (includeLinkedIn: boolean) => queue.slice(start, start + 200).map((candidate) => {
         const contact = candidateContacts(candidate);
         const lookup = candidateLookup(candidate);
         const person = lookup?.status === "done" ? lookup.info.people?.[0] : undefined;
@@ -897,6 +933,7 @@ export default function HospitalsMap() {
           phone: contact.phone,
           email: contact.email,
           contact_person: person ? `${person.name} (${person.title})` : null,
+          ...linkedInField(person, includeLinkedIn),
           website: contact.website,
           category: candidate.category,
           place_id: candidate.key,
@@ -906,7 +943,8 @@ export default function HospitalsMap() {
           source: "map_discovery",
         };
       });
-      const { data, error } = await supabase.from("leads").insert(rows).select();
+      let { data, error } = await supabase.from("leads").insert(rows(true)).select();
+      if (missingLinkedInColumn(error)) ({ data, error } = await supabase.from("leads").insert(rows(false)).select());
       if (error) {
         failure = error.message;
         break;

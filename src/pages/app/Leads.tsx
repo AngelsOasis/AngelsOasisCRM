@@ -152,6 +152,15 @@ export default function Leads() {
     setSyncing(false);
   }
 
+  // The contact's LinkedIn profile when the map's contact search found one;
+  // otherwise a LinkedIn people search for the name at the facility.
+  function contactLinkedInUrl(lead: Lead) {
+    if (lead.contact_linkedin_url) return lead.contact_linkedin_url;
+    const name = lead.contact_person?.replace(/\s*\(.*\)\s*$/, "").trim();
+    if (!name) return null;
+    return `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${name} ${lead.facility_name}`)}`;
+  }
+
   function exportLeadsCSV() {
     const headers = [
       "Facility",
@@ -159,6 +168,7 @@ export default function Leads() {
       "County",
       "Category",
       "Contact Person",
+      "Contact LinkedIn",
       "Department",
       "Email",
       "Phone",
@@ -168,21 +178,28 @@ export default function Leads() {
       "Last Contacted",
       "Created At",
     ];
-    const rows = visibleLeads.map((lead) => [
-      lead.facility_name,
-      lead.address,
-      lead.county,
-      LEAD_CATEGORIES.find((category) => category.value === lead.category)?.label ?? lead.category,
-      lead.contact_person,
-      lead.department,
-      lead.email,
-      lead.phone,
-      LEAD_STATUSES.find((status) => status.value === lead.status)?.label ?? lead.status,
-      lead.source.replaceAll("_", " "),
-      lead.notes,
-      lead.last_contacted_at,
-      lead.created_at,
-    ]);
+    // Excel and Google Sheets show a HYPERLINK formula as a clickable name.
+    const hyperlink = (url: string, label: string) =>
+      `=HYPERLINK("${url.replace(/"/g, '""')}","${label.replace(/"/g, '""')}")`;
+    const rows = visibleLeads.map((lead) => {
+      const linkedIn = contactLinkedInUrl(lead);
+      return [
+        lead.facility_name,
+        lead.address,
+        lead.county,
+        LEAD_CATEGORIES.find((category) => category.value === lead.category)?.label ?? lead.category,
+        lead.contact_person && linkedIn ? hyperlink(linkedIn, lead.contact_person) : lead.contact_person,
+        linkedIn,
+        lead.department,
+        lead.email,
+        lead.phone,
+        LEAD_STATUSES.find((status) => status.value === lead.status)?.label ?? lead.status,
+        lead.source.replaceAll("_", " "),
+        lead.notes,
+        lead.last_contacted_at,
+        lead.created_at,
+      ];
+    });
     const escapeCell = (value: string | null) => `"${(value ?? "").replace(/"/g, '""')}"`;
     const csv = [headers, ...rows]
       .map((row) => row.map(escapeCell).join(","))
@@ -219,13 +236,19 @@ export default function Leads() {
       LEAD_CATEGORIES.find((item) => item.value === category)?.label ?? category;
     const statusLabel = (status: LeadStatus) =>
       LEAD_STATUSES.find((item) => item.value === status)?.label ?? status;
+    const contactCell = (lead: Lead) => {
+      const linkedIn = contactLinkedInUrl(lead);
+      return lead.contact_person && linkedIn
+        ? `<a href="${escapeHtml(linkedIn)}">${escapeHtml(lead.contact_person)}</a>`
+        : escapeHtml(lead.contact_person);
+    };
     const rows = visibleLeads.map((lead) => `
       <tr>
         <td>${escapeHtml(lead.facility_name)}</td>
         <td>${escapeHtml(categoryLabel(lead.category))}</td>
         <td>${escapeHtml(lead.address)}</td>
         <td>${escapeHtml(lead.county)}</td>
-        <td>${escapeHtml(lead.contact_person)}</td>
+        <td>${contactCell(lead)}</td>
         <td>${escapeHtml(lead.email)}</td>
         <td>${escapeHtml(lead.phone)}</td>
         <td>${escapeHtml(statusLabel(lead.status))}</td>
@@ -254,6 +277,7 @@ export default function Leads() {
             th, td { border: 1px solid #d8d1d6; padding: 5px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
             th { background: #f4eff2; font-size: 9px; }
             tr { break-inside: avoid; }
+            a { color: #0a66c2; }
           </style>
         </head>
         <body>
