@@ -2,6 +2,7 @@ export const discovery = {};
 export default discovery;
 import { supabase } from "./supabaseClient";
 import { milesBetween } from "./geo";
+import { LTAC_PATTERN } from "../../api/_lib/segments";
 import type { Lead, LeadCategory } from "./types";
 
 export type DiscoveryProvider = "cdph" | "osm" | "osd" | "google";
@@ -20,6 +21,8 @@ export interface Candidate {
   website: string | null;
   category: LeadCategory;
   detail: string | null;
+  // Who runs the facility, when the source says (e.g. "Kaiser Permanente").
+  operator?: string | null;
   provider: DiscoveryProvider;
   // Every source that reported this facility (set when results are merged).
   sources?: DiscoveryProvider[];
@@ -73,10 +76,6 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus | null> 
   return data as IntegrationStatus;
 }
 
-// LTAC hospitals are licensed as general acute care hospitals, so only the
-// name or a speciality tag tells them apart.
-const LTAC_PATTERN = /long[- ]?term acute|\bltach?\b|kindred hospital|vibra hospital|select specialty hospital/i;
-
 function candidateCategory(tags: Record<string, string>): LeadCategory {
   const value = `${tags.amenity ?? ""} ${tags.healthcare ?? ""} ${tags.operator ?? ""}`.toLowerCase();
   if (LTAC_PATTERN.test(`${tags.name ?? ""} ${tags["healthcare:speciality"] ?? ""}`)) return "ltac";
@@ -113,6 +112,7 @@ function parseOverpassCandidates(payload: unknown): Candidate[] {
       website: tags.website ?? tags["contact:website"] ?? null,
       category: candidateCategory(tags),
       detail: tags.healthcare ?? tags.amenity ?? null,
+      operator: tags.operator ?? tags.brand ?? null,
       provider: "osm",
     }];
   });
@@ -348,6 +348,7 @@ export function mergeCandidates(lists: Candidate[][]): Candidate[] {
       match.website ??= candidate.website;
       match.address ??= candidate.address;
       match.county ??= candidate.county;
+      match.operator ??= candidate.operator;
       match.contactKeys ??= [match.key];
       if (!match.contactKeys.includes(candidate.key)) match.contactKeys.push(candidate.key);
       match.sources = [...(match.sources ?? []), candidate.provider];

@@ -27,6 +27,7 @@ import {
   type SearchMode,
 } from "../../lib/discovery";
 import { hostOf, isDirectoryHost, isOwnWebsite } from "../../../api/_lib/website-match";
+import { networkOf, segmentOf, type Network, type Segment } from "../../../api/_lib/segments";
 import LoadingScreen from "../../components/LoadingScreen";
 import {
   LEAD_CATEGORIES,
@@ -40,30 +41,45 @@ const RADII = [5, 10, 25, 50] as const;
 const MAX_RADIUS = 100;
 const DEFAULT_CENTER: [number, number] = [34.1614, -118.3942];
 
-// Marker groups: red hospitals, purple SNFs, orange LTACs, teal rehab centers / partners.
-type Group = "hospital" | "snf" | "ltac" | "rehab" | "partner";
+// Level of care: one marker color per segment.
+type Group = Segment;
 
 const GROUPS: { id: Group; label: string; color: string }[] = [
-  { id: "hospital", label: "Hospitals", color: "#DC2626" },
-  { id: "snf", label: "Skilled Nursing", color: "#7C3AED" },
+  { id: "acute", label: "Acute Care Hospitals", color: "#DC2626" },
+  { id: "subacute", label: "Subacute", color: "#DB2777" },
   { id: "ltac", label: "LTAC", color: "#EA580C" },
+  { id: "va", label: "VA / Veterans", color: "#1E3A8A" },
+  { id: "snf", label: "Skilled Nursing", color: "#7C3AED" },
   { id: "rehab", label: "Rehab Centers", color: "#0D9488" },
   { id: "partner", label: "Hospice, Home Health & Clinics", color: "#2DD4BF" },
 ];
 
 const GROUP_COLOR = Object.fromEntries(GROUPS.map((g) => [g.id, g.color])) as Record<Group, string>;
 
-function groupOf(category: LeadCategory): Group {
-  if (category === "hospital") return "hospital";
-  if (category === "skilled_nursing_facility") return "snf";
-  if (category === "ltac") return "ltac";
-  if (category === "rehab_center") return "rehab";
-  return "partner";
+// Health system the facility belongs to.
+const NETWORKS: { id: Network; label: string; color: string }[] = [
+  { id: "kaiser", label: "Kaiser Permanente", color: "#0369A1" },
+  { id: "providence", label: "Providence", color: "#65A30D" },
+  { id: "dignity", label: "Dignity Health", color: "#BE123C" },
+  { id: "other", label: "Independent / other", color: "#9CA3AF" },
+];
+
+const NETWORK_COLOR = Object.fromEntries(NETWORKS.map((n) => [n.id, n.color])) as Record<Network, string>;
+
+const candidateSegment = (c: Candidate) => segmentOf(c.category, c.name, c.operator);
+const candidateNetwork = (c: Candidate) => networkOf(c.name, c.operator);
+const leadSegment = (l: Lead) => segmentOf(l.category, l.facility_name);
+const leadNetwork = (l: Lead) => networkOf(l.facility_name);
+
+function matchesQuery(query: string, ...texts: (string | null | undefined)[]) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const haystack = texts.filter(Boolean).join(" ").toLowerCase();
+  return words.every((word) => haystack.includes(word));
 }
 
 // Contact legend: each marker shows the best way to reach the facility.
 type ContactLevel = "email" | "phone" | "website" | "none";
-type ColorBy = "type" | "contact";
+type ColorBy = "type" | "network" | "contact";
 
 const CONTACT_GROUPS: { id: ContactLevel; label: string; color: string }[] = [
   { id: "email", label: "Has email", color: "#16A34A" },
@@ -134,6 +150,12 @@ function saveContactCache(lookups: Record<string, ContactLookup>) {
 }
 
 const categoryLabel = (c: LeadCategory) => LEAD_CATEGORIES.find((x) => x.value === c)?.label ?? c;
+
+// "VA / Veterans · Kaiser Permanente"; partners keep their lead category.
+function kindLabel(segment: Segment, network: Network, category: LeadCategory) {
+  const care = segment === "partner" ? categoryLabel(category) : GROUPS.find((g) => g.id === segment)!.label;
+  return network === "other" ? care : `${care} · ${NETWORKS.find((n) => n.id === network)!.label}`;
+}
 
 // MapContainer only reads `center` on first render, so pan/zoom imperatively
 // whenever the selected facility or radius changes.
@@ -212,7 +234,9 @@ function ContactDetails({ phone, email, website, lookup, givenSource, onRescan }
             {info.people.map((person) => (
               <li key={person.name}>
                 <span className="text-ink">{person.name}</span>
-                <span className="text-plum/60"> — {person.title}</span>
+                <span className={/case manage/i.test(person.title) ? "font-semibold text-plum" : "text-plum/60"}>
+                  {" "}— {person.title}
+                </span>
                 <span className="text-plum/40">
                   {" · "}
                   {person.url
@@ -288,7 +312,13 @@ export default function HospitalsMap() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchNotice, setSearchNotice] = useState<string | null>(null);
   // Partners (thousands of hospices/home health agencies at larger radii) start hidden.
-  const [visibleGroups, setVisibleGroups] = useState<Set<Group>>(new Set(["hospital", "snf", "ltac", "rehab"]));
+  const [visibleGroups, setVisibleGroups] = useState<Set<Group>>(
+    new Set(["acute", "subacute", "ltac", "va", "snf", "rehab"])
+  );
+  const [visibleNetworks, setVisibleNetworks] = useState<Set<Network>>(
+    new Set(["kaiser", "providence", "dignity", "other"])
+  );
+  const [query, setQuery] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
   const [enriched, setEnriched] = useState<Record<string, { address: string | null; county: string | null }>>({});
   const [outreach, setOutreach] = useState<OutreachEmail[] | null>(null);
@@ -602,11 +632,13 @@ export default function HospitalsMap() {
           l.latitude != null &&
           l.longitude != null &&
           inRadius(l.latitude, l.longitude) &&
-          visibleGroups.has(groupOf(l.category)) &&
-          visibleContacts.has(contactLevel(l))
+          visibleGroups.has(leadSegment(l)) &&
+          visibleNetworks.has(leadNetwork(l)) &&
+          visibleContacts.has(contactLevel(l)) &&
+          matchesQuery(query, l.facility_name, l.address, l.contact_person)
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [leads, center, radius, visibleGroups, visibleContacts]
+    [leads, center, radius, visibleGroups, visibleNetworks, visibleContacts, query]
   );
 
   // Candidates that aren't already leads (those show as lead markers instead).
@@ -625,24 +657,51 @@ export default function HospitalsMap() {
     [newCandidates, contacts]
   );
 
-  const shownCandidates = newCandidates.filter(
-    (c) => visibleGroups.has(groupOf(c.category)) && visibleContacts.has(candidateLevels.get(c.key)!)
+  const candidateKinds = useMemo(
+    () => new Map(newCandidates.map((c) => [c.key, { segment: candidateSegment(c), network: candidateNetwork(c) }])),
+    [newCandidates]
   );
 
-  const groupCounts = useMemo(() => {
-    const counts: Record<Group, number> = { hospital: 0, snf: 0, ltac: 0, rehab: 0, partner: 0 };
-    for (const c of newCandidates) counts[groupOf(c.category)]++;
-    return counts;
-  }, [newCandidates]);
+  // Facilities matching the name search; each legend counts the ones that
+  // also pass the other legends' filters.
+  const searchedCandidates = useMemo(
+    () => newCandidates.filter((c) => matchesQuery(query, c.name, c.address, c.operator, c.detail)),
+    [newCandidates, query]
+  );
 
-  // Contact counts cover the facility types currently shown.
-  const contactCounts = useMemo(() => {
-    const counts: Record<ContactLevel, number> = { email: 0, phone: 0, website: 0, none: 0 };
-    for (const c of newCandidates) {
-      if (visibleGroups.has(groupOf(c.category))) counts[candidateLevels.get(c.key)!]++;
+  const shownCandidates = searchedCandidates.filter((c) => {
+    const kind = candidateKinds.get(c.key)!;
+    return visibleGroups.has(kind.segment) && visibleNetworks.has(kind.network) &&
+      visibleContacts.has(candidateLevels.get(c.key)!);
+  });
+
+  const groupCounts = useMemo(() => {
+    const counts = Object.fromEntries(GROUPS.map((g) => [g.id, 0])) as Record<Group, number>;
+    for (const c of searchedCandidates) {
+      const kind = candidateKinds.get(c.key)!;
+      if (visibleNetworks.has(kind.network)) counts[kind.segment]++;
     }
     return counts;
-  }, [newCandidates, candidateLevels, visibleGroups]);
+  }, [searchedCandidates, candidateKinds, visibleNetworks]);
+
+  const networkCounts = useMemo(() => {
+    const counts = Object.fromEntries(NETWORKS.map((n) => [n.id, 0])) as Record<Network, number>;
+    for (const c of searchedCandidates) {
+      const kind = candidateKinds.get(c.key)!;
+      if (visibleGroups.has(kind.segment)) counts[kind.network]++;
+    }
+    return counts;
+  }, [searchedCandidates, candidateKinds, visibleGroups]);
+
+  // Contact counts cover the facility types and health systems currently shown.
+  const contactCounts = useMemo(() => {
+    const counts: Record<ContactLevel, number> = { email: 0, phone: 0, website: 0, none: 0 };
+    for (const c of searchedCandidates) {
+      const kind = candidateKinds.get(c.key)!;
+      if (visibleGroups.has(kind.segment) && visibleNetworks.has(kind.network)) counts[candidateLevels.get(c.key)!]++;
+    }
+    return counts;
+  }, [searchedCandidates, candidateKinds, candidateLevels, visibleGroups, visibleNetworks]);
 
   const unscannedShown = shownCandidates.filter((c) => !candidateLookup(c));
 
@@ -731,6 +790,15 @@ export default function HospitalsMap() {
       const next = new Set(prev);
       if (next.has(group)) next.delete(group);
       else next.add(group);
+      return next;
+    });
+  }
+
+  function toggleNetwork(network: Network) {
+    setVisibleNetworks((prev) => {
+      const next = new Set(prev);
+      if (next.has(network)) next.delete(network);
+      else next.add(network);
       return next;
     });
   }
@@ -902,7 +970,9 @@ export default function HospitalsMap() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-serif text-3xl">Hospitals Map</h1>
-          <p className="mt-1 text-plum/60">Nearby hospitals, SNFs, LTACs, rehab centers, and healthcare partners.</p>
+          <p className="mt-1 text-plum/60">
+            Nearby acute, subacute, LTAC, and VA hospitals, SNFs, rehab centers, and healthcare partners.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <select className="rounded-lg border border-plum/20 px-3 py-2 text-sm"
@@ -938,7 +1008,7 @@ export default function HospitalsMap() {
         <div className="flex items-center gap-2">
           <span className="text-plum/60">Color markers by</span>
           <div className="flex overflow-hidden rounded-lg border border-plum/20">
-            {([["type", "Facility type"], ["contact", "Contact info"]] as const).map(([value, label]) => (
+            {([["type", "Level of care"], ["network", "Health system"], ["contact", "Contact info"]] as const).map(([value, label]) => (
               <button key={value} onClick={() => setColorBy(value)}
                 className={`px-3 py-1 text-sm ${colorBy === value ? "bg-plum text-white" : "bg-white text-plum"}`}>
                 {label}
@@ -949,6 +1019,13 @@ export default function HospitalsMap() {
         <span className="flex items-center gap-1.5 text-plum/60">
           <span className="inline-block h-3 w-3 rounded-full border-2 border-black bg-plum/30" /> Already a lead
         </span>
+        <input
+          type="search" placeholder="Search by name, e.g. Kaiser, Veterans, Kindred"
+          aria-label="Search facilities on the map by name"
+          className="w-72 max-w-full rounded-lg border border-plum/20 px-3 py-1 text-sm"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <span className="ml-auto flex items-center gap-2">
           <select className="rounded-lg border border-plum/20 px-2 py-1 text-sm"
             value={provider} onChange={(e) => setProvider(e.target.value as SearchMode)}>
@@ -968,7 +1045,7 @@ export default function HospitalsMap() {
       </div>
 
       <fieldset className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-plum/10 px-3 py-2 text-sm">
-        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-plum/50">Facility type</legend>
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-plum/50">Level of care</legend>
         {GROUPS.map((g) => (
           <label key={g.id} className="flex cursor-pointer items-center gap-1.5">
             <input type="checkbox" checked={visibleGroups.has(g.id)} onChange={() => toggleGroup(g.id)} />
@@ -987,6 +1064,18 @@ export default function HospitalsMap() {
             </button>
           )}
         </span>
+      </fieldset>
+
+      <fieldset className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-plum/10 px-3 py-2 text-sm">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-plum/50">Health system</legend>
+        {NETWORKS.map((n) => (
+          <label key={n.id} className="flex cursor-pointer items-center gap-1.5">
+            <input type="checkbox" checked={visibleNetworks.has(n.id)} onChange={() => toggleNetwork(n.id)} />
+            <span className="inline-block h-3 w-3 rounded-full"
+              style={{ background: colorBy === "network" ? n.color : "transparent", border: `2px solid ${n.color}` }} />
+            {n.label} <span className="text-plum/40">({networkCounts[n.id]})</span>
+          </label>
+        ))}
       </fieldset>
 
       <fieldset className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-plum/10 px-3 py-2 text-sm">
@@ -1064,7 +1153,9 @@ export default function HospitalsMap() {
                   weight: 1.5,
                   fillColor: colorBy === "contact"
                     ? CONTACT_COLOR[candidateLevels.get(c.key)!]
-                    : GROUP_COLOR[groupOf(c.category)],
+                    : colorBy === "network"
+                      ? NETWORK_COLOR[candidateKinds.get(c.key)!.network]
+                      : GROUP_COLOR[candidateKinds.get(c.key)!.segment],
                   fillOpacity: 0.9,
                 }}
                 eventHandlers={{ click: () => { setSelection({ type: "candidate", key: c.key }); setMessage(null); } }}
@@ -1080,7 +1171,11 @@ export default function HospitalsMap() {
                 pathOptions={{
                   color: "#0A0A0A",
                   weight: 2.5,
-                  fillColor: colorBy === "contact" ? CONTACT_COLOR[contactLevel(lead)] : GROUP_COLOR[groupOf(lead.category)],
+                  fillColor: colorBy === "contact"
+                    ? CONTACT_COLOR[contactLevel(lead)]
+                    : colorBy === "network"
+                      ? NETWORK_COLOR[leadNetwork(lead)]
+                      : GROUP_COLOR[leadSegment(lead)],
                   fillOpacity: 1,
                 }}
                 eventHandlers={{ click: () => { setSelection({ type: "lead", id: lead.id }); setMessage(null); } }}
@@ -1132,7 +1227,7 @@ export default function HospitalsMap() {
                 {selectedCandidate.address ?? (enriched[selectedCandidate.key] ? "Address unknown" : "Looking up address…")}
               </p>
               <p className="text-plum/60">
-                {categoryLabel(selectedCandidate.category)}
+                {kindLabel(candidateSegment(selectedCandidate), candidateNetwork(selectedCandidate), selectedCandidate.category)}
                 {selectedCandidate.county ? ` · ${selectedCandidate.county}` : ""}
               </p>
               {selectedCandidate.detail && <p className="text-plum/60">{selectedCandidate.detail}</p>}
@@ -1164,7 +1259,7 @@ export default function HospitalsMap() {
               <p className="font-semibold">{selectedLead.facility_name}</p>
               <p className="text-plum/60">{selectedLead.address}</p>
               <p className="text-plum/60">
-                {categoryLabel(selectedLead.category)}
+                {kindLabel(leadSegment(selectedLead), leadNetwork(selectedLead), selectedLead.category)}
                 {selectedLead.county ? ` · ${selectedLead.county}` : ""}
               </p>
               {selectedLead.latitude != null && selectedLead.longitude != null && (

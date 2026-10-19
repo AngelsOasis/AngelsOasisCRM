@@ -17,8 +17,17 @@ import {
   peopleFromLinkedInResults,
   peopleFromText,
   pickWebsite,
+  rankPeople,
   type Person,
 } from "./_lib/osd.js";
+import { networkOf, type Network } from "./_lib/segments.js";
+
+// Health systems whose staff list the system name on LinkedIn.
+const NETWORK_NAME: Partial<Record<Network, string>> = {
+  kaiser: "Kaiser Permanente",
+  providence: "Providence",
+  dignity: "Dignity Health",
+};
 
 declare const process: {
   env: Record<string, string | undefined>;
@@ -408,10 +417,19 @@ async function searchWeb(facility: FacilityInput, result: Enrichment) {
     }
   }
 
-  const linkedIn = await webSearch(
-    `${facility.name} case manager discharge planner director of nursing administrator`,
-    { domain: "linkedin.com" }
-  );
+  // Case managers are the main referral source, so most LinkedIn searches
+  // target them. Health-system staff list the system, not the hospital's
+  // licensed name, so those searches use the system name plus the city.
+  const system = NETWORK_NAME[networkOf(facility.name)];
+  const employer = system ? `${system} ${facility.city ?? facility.name}` : facility.name;
+  const searches = await Promise.allSettled([
+    webSearch(`${employer} inpatient case manager`, { domain: "linkedin.com" }),
+    webSearch(`${employer} case manager RN`, { domain: "linkedin.com" }),
+    webSearch(`${facility.name} discharge planner director of nursing administrator`, { domain: "linkedin.com" }),
+  ]);
+  const failed = searches.find((search): search is PromiseRejectedResult => search.status === "rejected");
+  if (failed && searches.every((search) => search.status === "rejected")) throw failed.reason;
+  const linkedIn = searches.flatMap((search) => (search.status === "fulfilled" ? search.value : []));
   for (const person of peopleFromLinkedInResults(facility.name, linkedIn)) {
     if (!result.people.some((p) => p.name === person.name)) result.people.push(person);
   }
@@ -504,6 +522,8 @@ async function enrich(facility: FacilityInput): Promise<Enrichment> {
   } else if (!searchEnabled) {
     result.webSearch.note = "Open Source Data (OSD) isn't set up — add TAVILY_API_KEY in Vercel to also search the web.";
   }
+  // Case managers first: the first person found becomes the lead's contact.
+  result.people = rankPeople(result.people);
   return result;
 }
 

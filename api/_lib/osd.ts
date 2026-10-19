@@ -4,6 +4,7 @@
 // Files under api/_lib are not exposed as routes by Vercel.
 
 import { hostOf, isOwnWebsite, nameMatch } from "./website-match.js";
+import { networkOf } from "./segments.js";
 export { hostOf, isDirectoryHost, isOwnWebsite, nameMatch, nameTokens } from "./website-match.js";
 
 declare const process: {
@@ -96,14 +97,39 @@ export function pickWebsite(name: string, results: SearchResult[]) {
 }
 
 // Referral-relevant roles to look for on websites and in search results.
+// Case managers come first: they're the main referral source, and the longer
+// titles must precede "Case Manager" so the most specific one is matched.
+const CASE_MANAGER_ROLES = [
+  "Inpatient Case Manager", "Acute Care Case Manager", "Hospital Case Manager", "RN Case Manager",
+  "Registered Nurse Case Manager", "Nurse Case Manager", "Clinical Case Manager", "Case Manager RN",
+  "Director of Case Management", "Manager of Case Management", "Case Management Manager",
+  "Case Management Director", "Case Manager",
+];
 const ROLES = [
-  "Case Manager", "Discharge Planner", "Director of Nursing", "Assistant Director of Nursing", "Administrator",
+  ...CASE_MANAGER_ROLES,
+  "Discharge Planner", "Director of Nursing", "Assistant Director of Nursing", "Administrator",
   "Executive Director", "Admissions Director", "Admissions Coordinator", "Director of Admissions",
   "Social Services Director", "Director of Social Services", "Social Worker", "Community Liaison",
   "Marketing Director", "Director of Marketing", "Clinical Liaison", "Medical Director", "Director of Rehab",
-  "Director of Rehabilitation", "Utilization Review", "Care Coordinator", "Intake Coordinator",
-  "Chief Nursing Officer", "Director of Case Management", "Clinical Case Manager", "Nurse Case Manager",
+  "Director of Rehabilitation", "Utilization Review Nurse", "Utilization Review", "Care Transitions Coordinator",
+  "Care Coordinator", "Intake Coordinator", "Chief Nursing Officer",
 ];
+
+export function isCaseManager(title: string) {
+  return /case manage/i.test(title);
+}
+
+// Case managers first, inpatient ones ahead of the rest, then discharge planners.
+function personRank(person: Person) {
+  if (/inpatient|acute|hospital/i.test(person.title) && isCaseManager(person.title)) return 0;
+  if (isCaseManager(person.title)) return 1;
+  if (/discharge|utilization|care transitions/i.test(person.title)) return 2;
+  return 3;
+}
+
+export function rankPeople(people: Person[]) {
+  return [...people].sort((a, b) => personRank(a) - personRank(b));
+}
 const ROLE_PATTERN = ROLES.map((role) => role.replace(/ /g, "\\s+")).join("|");
 const NAME_PATTERN = "[A-Z][a-z'’-]+(?:\\s+[A-Z]\\.)?(?:\\s+[A-Z][a-z'’-]+){1,2}";
 const CREDENTIALS = "(?:,?\\s*(?:RN|LVN|BSN|MSN|MSW|LCSW|MBA|NHA|MD|DO|PT|DPT|OTR|CCM|MHA)\\b)*";
@@ -139,15 +165,24 @@ export function peopleFromText(text: string): Person[] {
 // Only the search result (title + snippet) is used; LinkedIn pages are never fetched.
 export function peopleFromLinkedInResults(facilityName: string, results: SearchResult[]): Person[] {
   const people = new Map<string, Person>();
-  const roleRegex = new RegExp(`\\b(${ROLE_PATTERN})\\b`, "i");
+  const roleRegex = new RegExp(`\\b(${ROLE_PATTERN})\\b`, "gi");
+  const facilityNetwork = networkOf(facilityName);
   for (const result of results) {
     if (!/linkedin\.com\/in\//i.test(result.url)) continue;
     const text = `${result.title} ${result.description} ${result.extraSnippets.join(" ")}`;
-    if (nameMatch(facilityName, text) < 0.6) continue; // must clearly be about this facility
-    const role = text.match(roleRegex);
+    // Must clearly be about this facility. Health-system staff list the system
+    // ("Kaiser Permanente") rather than the licensed hospital name.
+    const match = nameMatch(facilityName, text);
+    const sameSystem = facilityNetwork !== "other" && networkOf(text) === facilityNetwork;
+    if (match < 0.6 && !(sameSystem && match >= 0.3)) continue;
+    // The headline in the title is the person's own job; the snippet may
+    // mention other roles. Prefer the highest-priority role in the title.
+    const roles = [...result.title.matchAll(roleRegex)].map((m) => canonicalRole(m[1]));
+    if (!roles.length) roles.push(...[...text.matchAll(roleRegex)].map((m) => canonicalRole(m[1])));
     const name = result.title.split(/\s+[-–—|]\s+/)[0]?.replace(/,.*$/, "").trim();
-    if (!role || !name || !new RegExp(`^${NAME_PATTERN}$`).test(name) || !plausibleName(name)) continue;
-    if (!people.has(name)) people.set(name, { name, title: canonicalRole(role[1]), source: "linkedin", url: result.url });
+    if (!roles.length || !name || !new RegExp(`^${NAME_PATTERN}$`).test(name) || !plausibleName(name)) continue;
+    const [person] = rankPeople(roles.map((role) => ({ name, title: role, source: "linkedin" as const, url: result.url })));
+    if (!people.has(name)) people.set(name, person);
   }
-  return [...people.values()].slice(0, 5);
+  return rankPeople([...people.values()]).slice(0, 8);
 }

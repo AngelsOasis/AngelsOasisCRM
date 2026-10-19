@@ -33,7 +33,7 @@ interface Candidate {
   provider: "osd";
 }
 
-// Six searches plus rate-limited geocoding can take ~40 seconds.
+// Parallel searches plus rate-limited geocoding can take ~40 seconds.
 export const config = { maxDuration: 60 };
 
 const USER_AGENT = "AngelsOasisCRM/1.0 (facility discovery)";
@@ -43,11 +43,18 @@ const DEADLINE_MS = 50_000;
 const CACHE_MS = 6 * 60 * 60 * 1000;
 const CACHE_LIMIT = 50;
 
-// One web search per facility type; results are listings for the area.
+// One web search per facility type or health system; results are listings for
+// the area. Specialty searches come first so they're placed on the map before
+// the geocoding limit is reached.
 const SEARCHES: { category: Category; query: string; detail: string }[] = [
-  { category: "hospital", query: "hospital", detail: "Hospital (OSD)" },
-  { category: "skilled_nursing_facility", query: "skilled nursing facility", detail: "Skilled nursing (OSD)" },
+  { category: "hospital", query: "VA medical center veterans hospital", detail: "VA / Veterans (OSD)" },
   { category: "ltac", query: "long term acute care hospital", detail: "Long-term acute care (OSD)" },
+  { category: "skilled_nursing_facility", query: "subacute care facility", detail: "Subacute (OSD)" },
+  { category: "hospital", query: "Kaiser Permanente medical center", detail: "Kaiser Permanente (OSD)" },
+  { category: "hospital", query: "Providence hospital medical center", detail: "Providence (OSD)" },
+  { category: "hospital", query: "Dignity Health hospital", detail: "Dignity Health (OSD)" },
+  { category: "hospital", query: "acute care hospital", detail: "Hospital (OSD)" },
+  { category: "skilled_nursing_facility", query: "skilled nursing facility", detail: "Skilled nursing (OSD)" },
   { category: "rehab_center", query: "rehabilitation center", detail: "Rehab center (OSD)" },
   { category: "healthcare_organization", query: "hospice", detail: "Hospice (OSD)" },
   { category: "healthcare_organization", query: "home health agency", detail: "Home health (OSD)" },
@@ -191,7 +198,7 @@ async function discover(latitude: number, longitude: number, radiusMiles: number
   const leads: Lead[] = [];
   let succeeded = 0;
   let firstError: Error | null = null;
-  // The five searches run in parallel.
+  // The searches run in parallel.
   const outcomes = await Promise.allSettled(
     SEARCHES.map((search) => webSearch(`${search.query} ${area}`, { count: 20 }))
   );

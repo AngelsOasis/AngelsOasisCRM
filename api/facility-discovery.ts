@@ -1,3 +1,5 @@
+import { LTAC_PATTERN } from "./_lib/segments.js";
+
 interface ApiRequest {
   method?: string;
   body?: unknown;
@@ -82,11 +84,9 @@ function titleCase(value: string | null) {
   return value?.toLowerCase().replace(/\b[a-z]/g, (letter) => letter.toUpperCase()) ?? null;
 }
 
-// CDPH licenses LTAC hospitals as general acute care, so the name identifies them.
-const LTAC_NAME = /long[- ]?term acute|\bltach?\b|kindred hospital|vibra hospital|select specialty hospital/i;
-
 function categoryFor(type: string, name: string): Category {
-  if (LTAC_NAME.test(name)) return "ltac";
+  // CDPH licenses LTAC hospitals as general acute care, so the name identifies them.
+  if (LTAC_PATTERN.test(name)) return "ltac";
   if (/rehabilitation|physical therapy/i.test(type)) return "rehab_center";
   if (/hospital|psychiatric unit/i.test(type)) return "hospital";
   if (/skilled nursing|intermediate care|congregate living/i.test(type)) return "skilled_nursing_facility";
