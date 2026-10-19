@@ -158,7 +158,7 @@ export function peopleFromText(text: string): Person[] {
       people.set(match[2], { name: match[2], title: canonicalRole(match[1]), source: "website", url: null });
     }
   }
-  return [...people.values()].slice(0, 8);
+  return rankPeople([...people.values()]).slice(0, 8);
 }
 
 // LinkedIn search-result titles look like "Jane Doe - Case Manager - Facility | LinkedIn".

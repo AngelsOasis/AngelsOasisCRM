@@ -28,6 +28,7 @@ import {
   type SearchMode,
 } from "../../lib/discovery";
 import { hostOf, isDirectoryHost, isOwnWebsite } from "../../../api/_lib/website-match";
+import { isCaseManager, rankPeople } from "../../../api/_lib/osd";
 import { networkOf, segmentOf, type Network, type Segment } from "../../../api/_lib/segments";
 import LoadingScreen from "../../components/LoadingScreen";
 import {
@@ -239,9 +240,10 @@ function ContactDetails({ phone, email, website, lookup, givenSource, onRescan }
         <div className="text-xs">
           <p className="text-plum/50">People found:</p>
           <ul className="mt-0.5 space-y-0.5">
-            {info.people.map((person) => (
+            {rankPeople(info.people).map((person, index) => (
               <li key={person.name}>
                 <span className="text-ink">{person.name}</span>
+                {index === 0 && isCaseManager(person.title) && <span className="ml-1 font-semibold text-forest">(Primary contact)</span>}
                 <span className={/case manage/i.test(person.title) ? "font-semibold text-plum" : "text-plum/60"}>
                   {" "}— {person.title}
                 </span>
@@ -427,17 +429,16 @@ export default function HospitalsMap() {
     };
   }
 
-  // Saves newly found contact details onto a lead, never overwriting values
-  // someone already entered.
+  // Fill missing details and prioritize a discovered case manager as the contact.
   async function saveLeadContacts(lead: Lead, info: ContactInfo) {
     let updates: Partial<Pick<Lead, "phone" | "email" | "website" | "contact_person" | "contact_linkedin_url">> = {};
     if (!lead.phone && info.phone) updates.phone = info.phone;
     if (!lead.email && info.email) updates.email = info.email;
     if (!lead.website && info.website) updates.website = info.website;
-    const people = info.people ?? [];
-    if (!lead.contact_person && people[0]) {
+    const people = rankPeople(info.people ?? []);
+    if (people[0] && (!lead.contact_person || isCaseManager(people[0].title))) {
       updates.contact_person = `${people[0].name} (${people[0].title})`;
-      updates = { ...updates, ...linkedInField(people[0], true) };
+      updates.contact_linkedin_url = people[0].source === "linkedin" ? people[0].url : null;
     }
 
     let saved = 0;
@@ -461,11 +462,32 @@ export default function HospitalsMap() {
   // Adds people found online to the lead's Contacts, skipping names already there.
   async function savePeople(leadId: string, people: ContactInfo["people"]) {
     if (!people.length) return 0;
-    const { data: existing } = await supabase.from("contacts").select("name").eq("lead_id", leadId);
+    people = rankPeople(people);
+    const { data: existing, error: readError } = await supabase.from("contacts").select("name").eq("lead_id", leadId);
+    if (readError) {
+      setMessage({ text: `Couldn't load existing contacts: ${readError.message}`, isError: true });
+      return 0;
+    }
+    const primary = people.find((person) => isCaseManager(person.title));
+    if (primary) {
+      const { error: clearError } = await supabase.from("contacts").update({ is_primary: false }).eq("lead_id", leadId).eq("is_primary", true);
+      if (clearError) {
+        setMessage({ text: `Couldn't update the primary contact: ${clearError.message}`, isError: true });
+        return 0;
+      }
+      const match = existing?.find((contact) => contact.name.trim().toLowerCase() === primary.name.trim().toLowerCase());
+      if (match) {
+        const { error } = await supabase.from("contacts").update({ is_primary: true, title: primary.title }).eq("lead_id", leadId).eq("name", match.name);
+        if (error) {
+          setMessage({ text: `Couldn't save the primary contact: ${error.message}`, isError: true });
+          return 0;
+        }
+      }
+    }
     const known = new Set(((existing as { name: string }[]) ?? []).map((c) => c.name.trim().toLowerCase()));
     const rows = people
-      .filter((person) => !known.has(person.name.toLowerCase()))
-      .map((person) => ({ lead_id: leadId, name: person.name, title: person.title }));
+      .filter((person) => !known.has(person.name.trim().toLowerCase()))
+      .map((person) => ({ lead_id: leadId, name: person.name, title: person.title, is_primary: person === primary }));
     if (!rows.length) return 0;
     const { error } = await supabase.from("contacts").insert(rows);
     if (error) {
@@ -864,6 +886,7 @@ export default function HospitalsMap() {
       ? cachedLookup.info
       : await lookupContacts(candidate.key, candidate);
     const nearest = nearestFacility(facilities, candidate.latitude, candidate.longitude);
+    const primaryPerson = rankPeople(info?.people ?? [])[0];
     const insertLead = (includeLinkedIn: boolean) => supabase
       .from("leads")
       .insert({
@@ -874,8 +897,8 @@ export default function HospitalsMap() {
         longitude: candidate.longitude,
         phone: candidate.phone ?? info?.phone ?? null,
         email: info?.email ?? null,
-        contact_person: info?.people?.[0] ? `${info.people[0].name} (${info.people[0].title})` : null,
-        ...linkedInField(info?.people?.[0], includeLinkedIn),
+        contact_person: primaryPerson ? `${primaryPerson.name} (${primaryPerson.title})` : null,
+        ...linkedInField(primaryPerson, includeLinkedIn),
         website: candidate.website ?? info?.website ?? null,
         category: candidate.category,
         place_id: candidate.key,
@@ -922,7 +945,7 @@ export default function HospitalsMap() {
       const rows = (includeLinkedIn: boolean) => queue.slice(start, start + 200).map((candidate) => {
         const contact = candidateContacts(candidate);
         const lookup = candidateLookup(candidate);
-        const person = lookup?.status === "done" ? lookup.info.people?.[0] : undefined;
+        const person = lookup?.status === "done" ? rankPeople(lookup.info.people ?? [])[0] : undefined;
         const nearest = nearestFacility(facilities, candidate.latitude, candidate.longitude);
         return {
           facility_name: candidate.name,
@@ -950,6 +973,11 @@ export default function HospitalsMap() {
         break;
       }
       added.push(...((data as Lead[]) ?? []));
+      for (const lead of (data as Lead[]) ?? []) {
+        const candidate = queue.find((item) => item.key === lead.place_id);
+        const lookup = candidate ? candidateLookup(candidate) : undefined;
+        if (lookup?.status === "done") await savePeople(lead.id, lookup.info.people ?? []);
+      }
       setAddingAll({ done: added.length, total: queue.length });
     }
     setLeads((prev) => [...added, ...prev]);
