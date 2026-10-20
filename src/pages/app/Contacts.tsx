@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { Download, FileText } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 import type { Lead } from "../../lib/types";
 
 // Every row belongs to a lead (FK leads.id). A lead's primary contact lives on
 // the lead itself (contact_person / contact_title / email / phone); extra
 // people at the same facility are rows in `contacts` with lead_id -> leads.id.
-type LeadContactFields = Pick<Lead, "id" | "facility_name" | "contact_person" | "contact_title" | "email" | "phone">;
+type LeadContactFields = Pick<Lead, "id" | "facility_name" | "contact_person" | "contact_title" | "contact_linkedin_url" | "email" | "phone">;
 
 interface ExtraContact {
   id: string;
@@ -26,11 +27,29 @@ interface Row {
   title: string;
   email: string;
   phone: string;
+  linkedinUrl: string | null;
 }
 
 type Draft = Pick<Row, "person" | "title" | "email" | "phone">;
 
 const NEW_CONTACT_PREFIX = "new:";
+
+function contactLinkedInUrl(person: string, facility: string, savedUrl?: string | null) {
+  if (!person.trim()) return null;
+  if (savedUrl) {
+    try {
+      const url = new URL(savedUrl);
+      if (
+        url.protocol === "https:" &&
+        (url.hostname === "linkedin.com" || url.hostname.endsWith(".linkedin.com"))
+      ) return url.toString();
+    } catch {
+      // Use a LinkedIn people search when the saved value is not a valid URL.
+    }
+  }
+  const name = person.replace(/\s*\(.*\)\s*$/, "").trim();
+  return `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${name} ${facility}`)}`;
+}
 
 export default function Contacts() {
   const [leads, setLeads] = useState<LeadContactFields[]>([]);
@@ -73,6 +92,7 @@ export default function Contacts() {
         title: lead.contact_title ?? "",
         email: lead.email ?? "",
         phone: lead.phone ?? "",
+        linkedinUrl: contactLinkedInUrl(lead.contact_person ?? "", lead.facility_name, lead.contact_linkedin_url),
       });
       for (const c of byLead.get(lead.id) ?? []) {
         all.push({
@@ -85,6 +105,7 @@ export default function Contacts() {
           title: c.title ?? "",
           email: c.email ?? "",
           phone: c.phone ?? "",
+          linkedinUrl: contactLinkedInUrl(c.name, lead.facility_name),
         });
       }
     }
@@ -93,6 +114,92 @@ export default function Contacts() {
     if (!q) return all;
     return all.filter((r) => [r.facility, r.person, r.title, r.email, r.phone].some((v) => v.toLowerCase().includes(q)));
   }, [leads, extras, search]);
+
+  function exportContactsCSV() {
+    const headers = ["Facility", "Title", "Email", "Phone", "Contact Person", "Contact LinkedIn"];
+    const hyperlink = (url: string, label: string) =>
+      `=HYPERLINK("${url.replace(/"/g, '""')}","${label.replace(/"/g, '""')}")`;
+    const escapeCell = (value: string | null) => `"${(value ?? "").replace(/"/g, '""')}"`;
+    const exportRows = rows.map((row) => [
+      row.facility,
+      row.title,
+      row.email,
+      row.phone,
+      row.person && row.linkedinUrl ? hyperlink(row.linkedinUrl, row.person) : row.person,
+      row.linkedinUrl,
+    ]);
+    const csv = [headers, ...exportRows].map((row) => row.map(escapeCell).join(",")).join("\r\n");
+    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `angels-oasis-contacts-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function saveContactsAsPDF() {
+    setError(null);
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      setError("Allow pop-ups for this site to save the contact list as a PDF.");
+      return;
+    }
+
+    const escapeHtml = (value: string | null | undefined) =>
+      (value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character] ?? character);
+    const rowsHtml = rows.map((row) => {
+      const person = row.person && row.linkedinUrl
+        ? `<a href="${escapeHtml(row.linkedinUrl)}">${escapeHtml(row.person)}</a>`
+        : escapeHtml(row.person);
+      return `<tr>
+        <td>${escapeHtml(row.facility)}</td>
+        <td>${escapeHtml(row.title)}</td>
+        <td>${escapeHtml(row.email)}</td>
+        <td>${escapeHtml(row.phone)}</td>
+        <td>${person}</td>
+      </tr>`;
+    }).join("");
+
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Angels Oasis Contacts</title>
+          <style>
+            @page { size: landscape; margin: 12mm; }
+            body { color: #29212a; font: 10px Arial, sans-serif; }
+            h1 { margin: 0 0 6px; font-size: 20px; }
+            p { margin: 0 0 14px; color: #665b65; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #d8d1d6; padding: 5px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+            th { background: #f4eff2; font-size: 9px; }
+            tr { break-inside: avoid; }
+            a { color: #0a66c2; }
+          </style>
+        </head>
+        <body>
+          <h1>Angels Oasis Contacts</h1>
+          <p>${rows.length} contact${rows.length === 1 ? "" : "s"} | Exported ${new Date().toLocaleDateString()}</p>
+          <table>
+            <thead><tr><th>Facility</th><th>Title</th><th>Email</th><th>Phone</th><th>Contact Person</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </body>
+      </html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  }
 
   function startEdit(row: Row) {
     setError(null);
@@ -188,12 +295,32 @@ export default function Contacts() {
           <h1 className="font-serif text-3xl">Contacts</h1>
           <p className="mt-1 text-plum/60">Every lead's contact details, plus any additional people at each facility.</p>
         </div>
-        <input
-          placeholder="Search facility, name, email, phone…"
-          className="w-72 rounded-lg border border-plum/20 px-3 py-2 text-sm"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            placeholder="Search facility, name, email, phone…"
+            className="w-72 rounded-lg border border-plum/20 px-3 py-2 text-sm"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={exportContactsCSV}
+            disabled={loading || rows.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg border border-plum/20 px-4 py-2 text-sm font-medium text-plum transition-colors hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="h-4 w-4" />
+            CSV Export
+          </button>
+          <button
+            type="button"
+            onClick={saveContactsAsPDF}
+            disabled={loading || rows.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg border border-plum/20 px-4 py-2 text-sm font-medium text-plum transition-colors hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileText className="h-4 w-4" />
+            Save as PDF
+          </button>
+        </div>
       </div>
 
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
@@ -237,7 +364,11 @@ export default function Contacts() {
                           {row.phone ? <a href={`tel:${row.phone}`} className="hover:underline">{row.phone}</a> : "—"}
                         </td>
                         <td className="px-4 py-3">
-                          {row.person || "—"}
+                          {row.person
+                            ? row.linkedinUrl
+                              ? <a href={row.linkedinUrl} target="_blank" rel="noreferrer" className="text-plum hover:underline">{row.person}</a>
+                              : row.person
+                            : "—"}
                           {row.kind === "lead" && row.person && <span className="ml-2 badge bg-ink text-white">Primary</span>}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-right text-xs">
