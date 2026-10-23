@@ -18,12 +18,16 @@ declare const process: {
 // the whole conversation each turn and gets back a subject + body. Nothing is
 // saved or sent here; the user picks a draft and saves it from the page.
 // Gemini keys are Vercel secrets GEMINI_API_KEY_1..3 (GEMINI_API_KEY1..3 or
-// GEMINI_API_KEY also work). When one key is rate-limited or rejected, the
-// next one is tried.
+// GEMINI_API_KEY also work). Models are tried in order: an overloaded (503)
+// or retired (404) model moves on to the next model, a rate-limited (429) or
+// rejected key moves on to the next key. GEMINI_MODELS (comma-separated)
+// overrides the model list.
 export const config = { maxDuration: 60 };
 
-const MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
-const REQUEST_TIMEOUT_MS = 45_000;
+const MODELS = (process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite")
+  .split(",").map((model) => model.trim()).filter(Boolean);
+const REQUEST_TIMEOUT_MS = 20_000;
+const TOTAL_BUDGET_MS = 55_000;
 const MAX_TURNS = 20;
 const MAX_TURN_CHARS = 8_000;
 
@@ -97,12 +101,26 @@ function toTurns(value: unknown): Turn[] {
   });
 }
 
-type GeminiResult = { subject: string; body: string } | { retry: boolean; error: string };
+// next: "key" tries the same model with the next key, "model" skips to the
+// next model, "stop" means retrying won't help.
+type GeminiResult =
+  | { subject: string; body: string }
+  | { next: "key" | "model" | "stop"; status: number; error: string };
 
-async function callGemini(apiKey: string, system: string, turns: Turn[]): Promise<GeminiResult> {
+function googleMessage(responseText: string): string {
+  try {
+    const message = JSON.parse(responseText)?.error?.message;
+    if (typeof message === "string") return message.slice(0, 300);
+  } catch {
+    // not JSON
+  }
+  return responseText.slice(0, 300);
+}
+
+async function callGemini(model: string, apiKey: string, system: string, turns: Turn[], timeoutMs: number): Promise<GeminiResult> {
   let response: Response;
   try {
-    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
@@ -118,26 +136,32 @@ async function callGemini(apiKey: string, system: string, turns: Turn[]): Promis
           },
         },
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    return { retry: true, error: error instanceof Error ? error.message : "Request failed" };
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    return { next: "model", status: 0, error: timedOut ? `${model} took too long to answer.` : `Couldn't reach Gemini (${model}).` };
   }
 
   const responseText = await response.text();
   if (!response.ok) {
-    // 400 means the request itself is bad, so another key won't help.
-    return { retry: response.status !== 400, error: `Gemini responded ${response.status}: ${responseText.slice(0, 300)}` };
+    const message = googleMessage(responseText);
+    const badKey = /api key/i.test(message);
+    const next =
+      response.status === 429 || response.status === 403 || badKey ? "key"
+      : response.status === 404 || response.status >= 500 ? "model"
+      : "stop";
+    return { next, status: response.status, error: `${model}: ${message}` };
   }
   try {
     const text = JSON.parse(responseText).candidates?.[0]?.content?.parts?.[0]?.text ?? "";
     const parsed = JSON.parse(text) as { subject?: unknown; body?: unknown };
     const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
-    if (!body) return { retry: false, error: "The AI returned an empty draft. Try rephrasing your request." };
+    if (!body) return { next: "model", status: 200, error: "The AI returned an empty draft. Try rephrasing your request." };
     const subject = typeof parsed.subject === "string" ? parsed.subject.trim().slice(0, 200) : "";
     return { subject, body };
   } catch {
-    return { retry: false, error: "The AI returned a draft that couldn't be read. Try again." };
+    return { next: "model", status: 200, error: "The AI returned a draft that couldn't be read. Try again." };
   }
 }
 
@@ -183,23 +207,32 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   }
 
   const system = `${genrePrompt} ${FACILITY_CONTEXT}`;
-  let lastError = "";
-  for (const [index, key] of keys.entries()) {
-    const result = await callGemini(key, system, turns);
-    if ("body" in result) {
-      response.json({ ...result, model: MODEL, keyIndex: index + 1 });
-      return;
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
+  const failures: Array<{ status: number; error: string }> = [];
+  attempts: for (const model of MODELS) {
+    for (const [index, key] of keys.entries()) {
+      const remaining = deadline - Date.now();
+      if (remaining < 3_000) break attempts;
+      const result = await callGemini(model, key, system, turns, Math.min(REQUEST_TIMEOUT_MS, remaining));
+      if ("body" in result) {
+        response.json({ ...result, model, keyIndex: index + 1 });
+        return;
+      }
+      failures.push(result);
+      console.error(`ai-compose: ${model} with key ${index + 1} failed (${result.status}): ${result.error}`);
+      if (result.next === "stop") break attempts;
+      if (result.next === "model") continue attempts;
     }
-    lastError = result.error;
-    console.error(`ai-compose: Gemini key ${index + 1} failed: ${result.error}`);
-    if (!result.retry) break;
   }
 
+  const last = failures[failures.length - 1];
   response.status(502).json({
-    error: lastError.includes(" 429")
+    error: !last
+      ? "The AI took too long to answer. Try again."
+      : failures.every((failure) => failure.status === 429)
       ? "All Gemini keys hit their free limit. Wait a minute and try again."
-      : lastError.startsWith("Gemini responded")
-      ? "The AI service couldn't write this draft. Try again in a moment."
-      : lastError,
+      : failures.every((failure) => failure.status === 503 || failure.status === 0)
+      ? "Gemini is busy right now. Wait a moment and try again."
+      : `The AI couldn't write this draft. ${last.error}`,
   });
 }
