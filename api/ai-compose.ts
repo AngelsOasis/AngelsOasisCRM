@@ -36,7 +36,8 @@ const FACILITY_CONTEXT =
   "Hospital-Level Expertise.', 24-hour skilled nursing and medically complex care, 3:1 " +
   "caregiver-to-resident ratio. Referral phone: (323) 213-2831. Warm, professional, trustworthy tone. " +
   "Write plain text email (no markdown), addressed to hospital and referral partners, ending with a clear " +
-  "call to action. Never invent statistics, bed counts, people, quotes or patient stories, and never include " +
+  "call to action. Return a greeting line (e.g. 'Dear Referral Partners,'), 3 to 5 short paragraphs of 2 to 4 " +
+  "sentences each, each on one topic, and a sign-off (e.g. 'Warm regards,\\nThe Angels Oasis Team'). Never invent statistics, bed counts, people, quotes or patient stories, and never include " +
   "patient information. When the user asks for changes, return the full revised email.";
 
 const GENRE_PROMPTS: Record<string, string> = {
@@ -101,6 +102,27 @@ function toTurns(value: unknown): Turn[] {
   });
 }
 
+// Builds the email body as greeting, blank-line-separated paragraphs and a
+// two-line sign-off. Lite models often pack everything into one paragraph, so
+// a paragraph longer than four sentences is split into groups of three.
+function formatBody(greeting: unknown, paragraphs: unknown, signOff: unknown): string {
+  const clean = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+  const blocks = (Array.isArray(paragraphs) ? paragraphs : [paragraphs]).map(clean).filter(Boolean).flatMap((paragraph) => {
+    const sentences = paragraph.match(/[^.!?]+(?:[.!?]+["')\]]*|$)\s*/g)?.map((s) => s.trim()).filter(Boolean) ?? [paragraph];
+    if (sentences.length <= 4) return [paragraph];
+    const groups: string[] = [];
+    for (let i = 0; i < sentences.length; i += 3) groups.push(sentences.slice(i, i + 3).join(" "));
+    return groups;
+  });
+  if (blocks.length === 0) return "";
+  const closing = clean(signOff);
+  return [
+    clean(greeting),
+    ...blocks,
+    closing.includes("\n") ? closing : closing.replace(/,\s*/, ",\n"),
+  ].filter(Boolean).join("\n\n");
+}
+
 // next: "key" tries the same model with the next key, "model" skips to the
 // next model, "stop" means retrying won't help.
 type GeminiResult =
@@ -131,8 +153,13 @@ async function callGemini(model: string, apiKey: string, system: string, turns: 
           responseMimeType: "application/json",
           responseSchema: {
             type: "OBJECT",
-            properties: { subject: { type: "STRING" }, body: { type: "STRING" } },
-            required: ["subject", "body"],
+            properties: {
+              subject: { type: "STRING" },
+              greeting: { type: "STRING" },
+              paragraphs: { type: "ARRAY", items: { type: "STRING" } },
+              signOff: { type: "STRING" },
+            },
+            required: ["subject", "greeting", "paragraphs", "signOff"],
           },
         },
       }),
@@ -155,8 +182,8 @@ async function callGemini(model: string, apiKey: string, system: string, turns: 
   }
   try {
     const text = JSON.parse(responseText).candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    const parsed = JSON.parse(text) as { subject?: unknown; body?: unknown };
-    const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
+    const parsed = JSON.parse(text) as { subject?: unknown; greeting?: unknown; paragraphs?: unknown; signOff?: unknown };
+    const body = formatBody(parsed.greeting, parsed.paragraphs, parsed.signOff);
     if (!body) return { next: "model", status: 200, error: "The AI returned an empty draft. Try rephrasing your request." };
     const subject = typeof parsed.subject === "string" ? parsed.subject.trim().slice(0, 200) : "";
     return { subject, body };
