@@ -91,10 +91,10 @@ type ContactLevel = "email" | "phone" | "website" | "none";
 type ColorBy = "type" | "network" | "contact";
 
 const CONTACT_GROUPS: { id: ContactLevel; label: string; color: string }[] = [
-  { id: "email", label: "Has email", color: "#16A34A" },
-  { id: "phone", label: "Contact number (no email)", color: "#2563EB" },
-  { id: "website", label: "Website only", color: "#F59E0B" },
-  { id: "none", label: "No contact info yet", color: "#9CA3AF" },
+  { id: "email", label: "Email", color: "#16A34A" },
+  { id: "phone", label: "Contact number", color: "#2563EB" },
+  { id: "website", label: "Website", color: "#F59E0B" },
+  { id: "none", label: "No contact info", color: "#9CA3AF" },
 ];
 
 const CONTACT_COLOR = Object.fromEntries(CONTACT_GROUPS.map((g) => [g.id, g.color])) as Record<ContactLevel, string>;

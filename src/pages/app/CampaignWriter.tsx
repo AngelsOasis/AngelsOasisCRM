@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { Sparkles } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 import type { CampaignDay } from "../../lib/types";
+import ComposeEmailModal, { type ComposedEmail } from "../../components/ComposeEmailModal";
 
 const MAX_DRAFTS_PER_GENRE = 100;
 
@@ -41,6 +43,8 @@ export default function CampaignWriter() {
   const [savedDrafts, setSavedDrafts] = useState<SavedDraft[]>([]);
   const [loadingDrafts, setLoadingDrafts] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const [generatedBy, setGeneratedBy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -117,6 +121,22 @@ export default function CampaignWriter() {
     setDraft((current) => ({ ...current, [field]: value }));
   }
 
+  function applyComposedEmail(email: ComposedEmail) {
+    if ((draft.subject.trim() || draft.body.trim()) && !window.confirm("Replace the current subject and body with this AI draft?")) {
+      return;
+    }
+    setDraft((current) => ({
+      ...current,
+      title: current.title || email.subject,
+      subject: email.subject,
+      body: email.body,
+    }));
+    setGeneratedBy(email.model);
+    setComposing(false);
+    setError(null);
+    setMessage("AI draft added. Review and edit it before saving.");
+  }
+
   async function saveDraft(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving || atLimit) return;
@@ -174,7 +194,7 @@ export default function CampaignWriter() {
       campaign_id: campaign.id,
       subject: draft.subject.trim() || null,
       body: draft.body.trim() || null,
-      generated_by_model: "manual",
+      generated_by_model: generatedBy ? `${generatedBy} (edited)` : "manual",
     });
 
     if (draftError) {
@@ -194,6 +214,7 @@ export default function CampaignWriter() {
     }
 
     setDraft(EMPTY_DRAFT);
+    setGeneratedBy(null);
     setMessage("Draft saved. It has not been sent.");
     await loadDrafts();
     setSaving(false);
@@ -203,7 +224,7 @@ export default function CampaignWriter() {
     <div>
       <h1 className="font-serif text-3xl">Campaign Writer</h1>
       <p className="mt-1 text-plum/60">
-        Write and save campaign drafts yourself. No AI provider or Edge Function is used.
+        Write campaign drafts yourself, or start from an AI draft and edit it. Nothing is sent from here.
       </p>
 
       <form onSubmit={saveDraft} className="card mt-6 max-w-3xl space-y-4">
@@ -268,10 +289,24 @@ export default function CampaignWriter() {
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
         {message && <p role="status" className="text-sm text-plum">{message}</p>}
 
-        <button type="submit" disabled={saving || loadingDrafts || atLimit} className="btn-primary">
-          {saving ? "Saving…" : "Save draft"}
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button type="submit" disabled={saving || loadingDrafts || atLimit} className="btn-primary">
+            {saving ? "Saving…" : "Save draft"}
+          </button>
+          <button type="button" onClick={() => setComposing(true)} disabled={saving} className="btn-secondary gap-2">
+            <Sparkles className="h-4 w-4" /> Compose email
+          </button>
+        </div>
       </form>
+
+      {composing && (
+        <ComposeEmailModal
+          genreValue={genre}
+          genreLabel={GENRES.find((item) => item.value === genre)?.label ?? ""}
+          onUse={applyComposedEmail}
+          onClose={() => setComposing(false)}
+        />
+      )}
 
       <section className="mt-8 max-w-3xl">
         <h2 className="font-serif text-xl">
