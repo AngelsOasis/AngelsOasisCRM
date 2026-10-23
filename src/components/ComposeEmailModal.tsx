@@ -6,18 +6,31 @@ export interface ComposedEmail {
   subject: string;
   body: string;
   model: string;
+  genre: string;
 }
 
 type ChatMessage =
-  | { role: "user"; text: string }
+  | { role: "user"; text: string; genre: string }
   | { role: "model"; email: ComposedEmail }
   | { role: "error"; text: string };
 
-const SUGGESTIONS = [
-  "Announce open bed space for ventilator patients this month",
-  "Explain what a CLHF is to a new hospital case manager",
-  "Thank our referral partners and invite them for a tour",
-];
+const SUGGESTIONS: Record<string, string[]> = {
+  monday: [
+    "This week's newsletter: open beds, a discharge-planning tip, and an invite to tour",
+    "Monthly roundup for referral partners with facility updates and community news",
+    "Thank our referral partners and invite them for a tour",
+  ],
+  wednesday: [
+    "Explain what a CLHF is to a new hospital case manager",
+    "Which patients are a good fit for ventilator care at Angels Oasis?",
+    "Walk discharge planners through how a referral to us works",
+  ],
+  friday: [
+    "Blog post: a day in the life of our nursing team",
+    "Blog post on how families can prepare for a move from hospital to a CLHF",
+    "Turn this testimonial into a post: (paste the real quote and who said it)",
+  ],
+};
 
 // Gemini sees its earlier drafts as plain "Subject/Body" text so follow-ups
 // like "make it shorter" revise the latest draft.
@@ -31,12 +44,13 @@ function toApiMessages(messages: ChatMessage[]) {
   );
 }
 
-export default function ComposeEmailModal({ genreValue, genreLabel, onUse, onClose }: {
-  genreValue: string;
-  genreLabel: string;
+export default function ComposeEmailModal({ genres, initialGenre, onUse, onClose }: {
+  genres: { value: string; label: string }[];
+  initialGenre: string;
   onUse: (email: ComposedEmail) => void;
   onClose: () => void;
 }) {
+  const [genre, setGenre] = useState(initialGenre);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -58,7 +72,7 @@ export default function ComposeEmailModal({ genreValue, genreLabel, onUse, onClo
   async function send(text = input) {
     const prompt = text.trim();
     if (!prompt || sending) return;
-    const next: ChatMessage[] = [...messages, { role: "user", text: prompt }];
+    const next: ChatMessage[] = [...messages, { role: "user", text: prompt, genre }];
     setMessages(next);
     setInput("");
     setSending(true);
@@ -72,11 +86,11 @@ export default function ComposeEmailModal({ genreValue, genreLabel, onUse, onClo
           "Content-Type": "application/json",
           Authorization: `Bearer ${data.session?.access_token ?? ""}`,
         },
-        body: JSON.stringify({ genre: genreValue, messages: toApiMessages(next) }),
+        body: JSON.stringify({ genre, messages: toApiMessages(next) }),
       });
       const result = (await response.json().catch(() => ({}))) as Partial<ComposedEmail> & { error?: string };
       reply = response.ok && result.body
-        ? { role: "model", email: { subject: result.subject ?? "", body: result.body, model: result.model ?? "gemini" } }
+        ? { role: "model", email: { subject: result.subject ?? "", body: result.body, model: result.model ?? "gemini", genre } }
         : { role: "error", text: result.error ?? `The AI composer returned ${response.status}.` };
     } catch {
       reply = { role: "error", text: "Couldn't reach the server. Check your connection and try again." };
@@ -106,8 +120,16 @@ export default function ComposeEmailModal({ genreValue, genreLabel, onUse, onClo
             <h2 id="compose-email-title" className="flex items-center gap-2 font-sans text-lg font-semibold text-ink">
               <Sparkles className="h-5 w-5 text-forest" /> Compose email
             </h2>
-            <p className="text-xs text-plum/60">{genreLabel} · Gemini · Drafts are never sent from here</p>
+            <p className="text-xs text-plum/60">Gemini · Drafts are never sent from here</p>
           </div>
+          <label className="ml-auto flex items-center gap-2 text-sm text-plum/80">
+            <span className="hidden sm:inline">Genre</span>
+            <select value={genre} onChange={(e) => setGenre(e.target.value)} disabled={sending}
+              aria-label="Genre for the next draft"
+              className="rounded-lg border border-plum/20 px-2 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-forest">
+              {genres.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </label>
           <button onClick={onClose} aria-label="Close"
             className="rounded-lg border border-plum/20 p-1.5 text-ink transition hover:bg-plum/5 focus:outline-none focus:ring-2 focus:ring-plum">
             <X className="h-5 w-5" />
@@ -122,7 +144,7 @@ export default function ComposeEmailModal({ genreValue, genreLabel, onUse, onClo
                 Describe the email, then ask for changes like “make it shorter” or “warmer tone”.
               </p>
               <div className="mt-5 space-y-2">
-                {SUGGESTIONS.map((suggestion) => (
+                {(SUGGESTIONS[genre] ?? []).map((suggestion) => (
                   <button key={suggestion} type="button" onClick={() => send(suggestion)}
                     className="block w-full rounded-xl border border-plum/15 bg-white px-4 py-2.5 text-left text-sm text-ink transition hover:border-forest hover:bg-sage-light/40">
                     {suggestion}
@@ -145,7 +167,9 @@ export default function ComposeEmailModal({ genreValue, genreLabel, onUse, onClo
               </p>
             ) : (
               <div key={index} className="max-w-[90%] rounded-2xl rounded-bl-sm border border-plum/10 bg-white px-4 py-3 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-plum/50">Subject</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-plum/50">
+                  {genres.find((item) => item.value === message.email.genre)?.label} · Subject
+                </p>
                 <p className="font-medium text-ink">{message.email.subject || "(no subject)"}</p>
                 <p className="mt-3 whitespace-pre-wrap text-sm text-ink">{message.email.body}</p>
                 <div className="mt-3 flex flex-wrap gap-2 border-t border-plum/10 pt-3">

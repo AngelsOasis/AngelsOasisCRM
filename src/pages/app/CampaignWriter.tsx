@@ -131,6 +131,7 @@ export default function CampaignWriter() {
       subject: email.subject,
       body: email.body,
     }));
+    setGenre(email.genre as CampaignDay);
     setGeneratedBy(email.model);
     setComposing(false);
     setError(null);
@@ -301,8 +302,8 @@ export default function CampaignWriter() {
 
       {composing && (
         <ComposeEmailModal
-          genreValue={genre}
-          genreLabel={GENRES.find((item) => item.value === genre)?.label ?? ""}
+          genres={GENRES}
+          initialGenre={genre}
           onUse={applyComposedEmail}
           onClose={() => setComposing(false)}
         />

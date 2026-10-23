@@ -35,22 +35,34 @@ const FACILITY_CONTEXT =
   "Angels Oasis is a licensed Congregate Living Health Facility (CLHF) — tagline 'Home-Like Care. " +
   "Hospital-Level Expertise.', 24-hour skilled nursing and medically complex care, 3:1 " +
   "caregiver-to-resident ratio. Referral phone: (323) 213-2831. Warm, professional, trustworthy tone. " +
-  "Write plain text email (no markdown), addressed to hospital and referral partners, ending with a clear " +
-  "call to action. Return a greeting line (e.g. 'Dear Referral Partners,'), 3 to 5 short paragraphs of 2 to 4 " +
-  "sentences each, each on one topic, and a sign-off (e.g. 'Warm regards,\\nThe Angels Oasis Team'). Never invent statistics, bed counts, people, quotes or patient stories, and never include " +
-  "patient information. When the user asks for changes, return the full revised email.";
+  "Write plain text (no markdown, no asterisks or # symbols) for hospital and referral partners. Return a " +
+  "greeting line (e.g. 'Dear Referral Partners,'), an intro paragraph, the sections described above (each with a " +
+  "short heading, 1 to 2 paragraphs of 2 to 4 sentences, and optional bullets of a few words each), a closing " +
+  "paragraph with a clear call to action, and a sign-off (e.g. 'Warm regards,\\nThe Angels Oasis Team'). Never " +
+  "invent statistics, bed counts, dates, events, people, quotes or patient stories — only use facts given here or " +
+  "by the user — and never include patient information. When the user asks for changes, return the full revised email.";
 
+// Each genre sets its own topic and layout. The user's request can still
+// override the layout ("no headings", "make it a short note").
 const GENRE_PROMPTS: Record<string, string> = {
   monday:
-    "You write Angels Oasis's weekly newsletter for hospital and referral-partner leads. Cover facility " +
-    "updates, healthcare industry information, CLHF education, patient-transition information and community updates.",
+    "You write Angels Oasis's Weekly Newsletter for hospital and referral-partner leads. Layout: 3 to 4 short " +
+    "newsletter sections with topic headings such as 'Facility Updates', 'Industry Insights', 'Transition Tips' or " +
+    "'Community News', picked to fit the user's request. Keep each section brief and skimmable; bullets are " +
+    "welcome for quick facts. The subject reads like a newsletter issue (e.g. 'Angels Oasis Weekly: ...').",
   wednesday:
-    "You write Angels Oasis's facility-education email for hospitals and referral partners. Explain what a CLHF " +
-    "is, when patients need specialized residential care, ventilator care, skilled nursing services, hospice " +
-    "support, medical complexity care, and why referral sources choose Angels Oasis.",
+    "You write Angels Oasis's Facility Education email for hospitals, case managers and discharge planners. " +
+    "Teach one topic in depth: what a CLHF is, when patients need specialized residential care, ventilator care, " +
+    "skilled nursing, hospice support, medical complexity care, or why referral sources choose Angels Oasis. " +
+    "Layout: 3 sections whose headings are questions a case manager would ask (e.g. 'What is a CLHF?', 'Which " +
+    "patients are a good fit?', 'How does a referral work?'). Use bullets for criteria, services or steps. The " +
+    "subject names the lesson (e.g. 'Understanding CLHF Care: ...').",
   friday:
-    "You write Angels Oasis's testimonials/blog email. Use ONLY real testimonial text the user provides — never " +
-    "invent a quote or a person's story. If none is provided, write a short educational blog piece instead.",
+    "You write Angels Oasis's Testimonials / Blog email, styled as a short blog article. Layout: a headline-style " +
+    "subject, a story-like intro, and 2 to 3 sections with descriptive headings. If the user provides real " +
+    "testimonial text, quote it word for word in its own section headed 'In Their Words' with the attribution " +
+    "they give, and build the article around it. If no testimonial is provided, write an educational or " +
+    "behind-the-scenes blog piece instead and never write a quote, review or person's story yourself.",
 };
 
 type Turn = { role: "user" | "model"; text: string };
@@ -102,24 +114,46 @@ function toTurns(value: unknown): Turn[] {
   });
 }
 
-// Builds the email body as greeting, blank-line-separated paragraphs and a
-// two-line sign-off. Lite models often pack everything into one paragraph, so
-// a paragraph longer than four sentences is split into groups of three.
-function formatBody(greeting: unknown, paragraphs: unknown, signOff: unknown): string {
-  const clean = (value: unknown) => (typeof value === "string" ? value.trim() : "");
-  const blocks = (Array.isArray(paragraphs) ? paragraphs : [paragraphs]).map(clean).filter(Boolean).flatMap((paragraph) => {
-    const sentences = paragraph.match(/[^.!?]+(?:[.!?]+["')\]]*|$)\s*/g)?.map((s) => s.trim()).filter(Boolean) ?? [paragraph];
+// Builds the plain-text email: greeting, intro, sections (UPPERCASE heading,
+// paragraphs, then "•" bullets), closing and a two-line sign-off, all
+// blank-line separated. Lite models often pack a section into one long
+// paragraph, so a paragraph longer than four sentences is split into threes.
+function formatBody(email: Record<string, unknown>): string {
+  const clean = (value: unknown) => (typeof value === "string" ? value.replace(/[*#]+/g, "").trim() : "");
+  const list = (value: unknown) => (Array.isArray(value) ? value : [value]).map(clean).filter(Boolean);
+  const paragraphs = (value: unknown) => list(value).flatMap((paragraph) => {
+    // A piece that doesn't start like a sentence (", we provide…" after the
+    // tagline's periods) stays with the one before it.
+    const sentences = (paragraph.match(/[^.!?]+(?:[.!?]+["')\]]*|$)\s*/g) ?? [paragraph])
+      .map((s) => s.trim()).filter(Boolean)
+      .reduce<string[]>((merged, s) => {
+        if (merged.length && !/^["'(\[]?[A-Z0-9]/.test(s)) merged[merged.length - 1] += s.match(/^[,;:)]/) ? s : ` ${s}`;
+        else merged.push(s);
+        return merged;
+      }, []);
     if (sentences.length <= 4) return [paragraph];
     const groups: string[] = [];
     for (let i = 0; i < sentences.length; i += 3) groups.push(sentences.slice(i, i + 3).join(" "));
     return groups;
   });
-  if (blocks.length === 0) return "";
-  const closing = clean(signOff);
+
+  const sections = (Array.isArray(email.sections) ? email.sections : []).flatMap((section) => {
+    if (!section || typeof section !== "object") return [];
+    const { heading, paragraphs: text, bullets } = section as Record<string, unknown>;
+    const body = paragraphs(text);
+    const points = list(bullets).map((bullet) => `• ${bullet.replace(/^[-•]\s*/, "")}`);
+    if (!body.length && !points.length) return [];
+    const title = clean(heading).replace(/:$/, "").toUpperCase();
+    return [[title, ...body, points.join("\n")].filter(Boolean).join("\n\n")];
+  });
+  const middle = [...paragraphs(email.intro), ...sections, ...paragraphs(email.closing)];
+  if (!middle.length) return "";
+
+  const signOff = clean(email.signOff);
   return [
-    clean(greeting),
-    ...blocks,
-    closing.includes("\n") ? closing : closing.replace(/,\s*/, ",\n"),
+    clean(email.greeting),
+    ...middle,
+    signOff.includes("\n") ? signOff : signOff.replace(/,\s*/, ",\n"),
   ].filter(Boolean).join("\n\n");
 }
 
@@ -156,10 +190,23 @@ async function callGemini(model: string, apiKey: string, system: string, turns: 
             properties: {
               subject: { type: "STRING" },
               greeting: { type: "STRING" },
-              paragraphs: { type: "ARRAY", items: { type: "STRING" } },
+              intro: { type: "STRING" },
+              sections: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    heading: { type: "STRING" },
+                    paragraphs: { type: "ARRAY", items: { type: "STRING" } },
+                    bullets: { type: "ARRAY", items: { type: "STRING" } },
+                  },
+                  required: ["heading", "paragraphs"],
+                },
+              },
+              closing: { type: "STRING" },
               signOff: { type: "STRING" },
             },
-            required: ["subject", "greeting", "paragraphs", "signOff"],
+            required: ["subject", "greeting", "intro", "sections", "closing", "signOff"],
           },
         },
       }),
@@ -182,8 +229,8 @@ async function callGemini(model: string, apiKey: string, system: string, turns: 
   }
   try {
     const text = JSON.parse(responseText).candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    const parsed = JSON.parse(text) as { subject?: unknown; greeting?: unknown; paragraphs?: unknown; signOff?: unknown };
-    const body = formatBody(parsed.greeting, parsed.paragraphs, parsed.signOff);
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const body = formatBody(parsed);
     if (!body) return { next: "model", status: 200, error: "The AI returned an empty draft. Try rephrasing your request." };
     const subject = typeof parsed.subject === "string" ? parsed.subject.trim().slice(0, 200) : "";
     return { subject, body };
