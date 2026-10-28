@@ -19,8 +19,6 @@ export default function SendMessageModal({ leads, onClose }: Props) {
   const [categoryFilter, setCategoryFilter] = useState<LeadCategory | "all">("all");
   const [contactFilter, setContactFilter] = useState<ContactFilter>("email");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -70,8 +68,8 @@ export default function SendMessageModal({ leads, onClose }: Props) {
   const statusLabel = (value: LeadStatus) => LEAD_STATUSES.find((s) => s.value === value)?.label ?? value;
 
   async function send() {
-    if (selectedLeads.length === 0 || !subject.trim() || !body.trim()) return;
-    if (!confirm(`Send this message to ${selectedLeads.length} lead${selectedLeads.length === 1 ? "" : "s"} through GHL?`)) return;
+    if (selectedLeads.length === 0) return;
+    if (!confirm(`Send ${selectedLeads.length} lead${selectedLeads.length === 1 ? "" : "s"} to GHL?`)) return;
     setSending(true);
     setResult(null);
     try {
@@ -82,7 +80,7 @@ export default function SendMessageModal({ leads, onClose }: Props) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${data.session?.access_token ?? ""}`,
         },
-        body: JSON.stringify({ leads: selectedLeads, message: { subject: subject.trim(), body: body.trim() } }),
+        body: JSON.stringify({ leads: selectedLeads }),
       });
       const json = (await response.json().catch(() => ({}))) as {
         sent?: number;
@@ -207,23 +205,17 @@ export default function SendMessageModal({ leads, onClose }: Props) {
           </table>
         </div>
 
-        <div className="space-y-3 border-t border-plum/10 bg-cream/40 px-6 py-4">
-          <input placeholder="Subject" className="w-full rounded-lg border border-plum/20 px-3 py-2 text-sm"
-            value={subject} onChange={(e) => setSubject(e.target.value)} disabled={sending} />
-          <textarea placeholder="Message" rows={4} className="w-full rounded-lg border border-plum/20 px-3 py-2 text-sm"
-            value={body} onChange={(e) => setBody(e.target.value)} disabled={sending} />
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            {result && (
-              <p role={result.isError ? "alert" : "status"}
-                className={`mr-auto text-sm ${result.isError ? "text-red-600" : "text-forest"}`}>{result.text}</p>
-            )}
-            <button type="button" onClick={send}
-              disabled={sending || selectedLeads.length === 0 || !subject.trim() || !body.trim()}
-              className="btn-primary inline-flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50">
-              <Send className="h-4 w-4" />
-              {sending ? "Sending…" : `Send to ${selectedLeads.length} lead${selectedLeads.length === 1 ? "" : "s"}`}
-            </button>
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-plum/10 bg-cream/40 px-6 py-4">
+          {result && (
+            <p role={result.isError ? "alert" : "status"}
+              className={`mr-auto text-sm ${result.isError ? "text-red-600" : "text-forest"}`}>{result.text}</p>
+          )}
+          <button type="button" onClick={send}
+            disabled={sending || selectedLeads.length === 0}
+            className="btn-primary inline-flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50">
+            <Send className="h-4 w-4" />
+            {sending ? "Sending…" : `Send to ${selectedLeads.length} lead${selectedLeads.length === 1 ? "" : "s"}`}
+          </button>
         </div>
       </div>
     </div>

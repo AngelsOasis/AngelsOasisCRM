@@ -184,7 +184,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   }
   const webhookUrl = lookup.url;
 
-  let body: { leads?: unknown; test?: unknown; message?: unknown } | undefined;
+  let body: { leads?: unknown; test?: unknown } | undefined;
   try {
     body = (typeof request.body === "string" ? JSON.parse(request.body || "{}") : request.body) as typeof body;
   } catch {
@@ -194,27 +194,6 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   const leads = body?.test === true
     ? [withGhlFields(SAMPLE_LEAD, true)]
     : Array.isArray(body?.leads) ? body.leads.map(toPayload).filter((l): l is LeadPayload => !!l) : [];
-  // "Send Message" on the Leads page adds an email to each lead; the GHL
-  // workflow can branch on action === "send_message" to send it.
-  const message = body?.message as { subject?: unknown; body?: unknown } | undefined;
-  if (message !== undefined) {
-    const subject = typeof message?.subject === "string" ? message.subject.trim() : "";
-    const text = typeof message?.body === "string" ? message.body.trim() : "";
-    if (!subject || !text) {
-      response.status(400).json({ error: "Add a subject and message." });
-      return;
-    }
-    for (const lead of leads) {
-      lead.action = "send_message";
-      lead.email_subject = subject;
-      lead.email_body = text;
-      lead.email_body_html = text
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-        .split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`).join("");
-    }
-  } else {
-    for (const lead of leads) lead.action ??= "save_lead";
-  }
   if (leads.length === 0) {
     response.status(400).json({ error: "No leads to send." });
     return;
