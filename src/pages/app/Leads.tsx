@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Download, FileText, Search, Upload } from "lucide-react";
+import { Download, FileText, MessageSquare, Search, Upload } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 import { leadLocationFields } from "../../lib/geo";
+import SendMessageModal from "../../components/SendMessageModal";
 import { LEAD_CATEGORIES, LEAD_STATUSES, type Facility, type Lead, type LeadCategory, type LeadStatus } from "../../lib/types";
 
 type SortOrder = "newest" | "oldest" | "az" | "za";
@@ -42,6 +43,7 @@ export default function Leads() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [showSendMessage, setShowSendMessage] = useState(false);
 
   useEffect(() => {
     supabase.from("facilities").select("*").then(({ data }) => setFacilities((data as Facility[]) ?? []));
@@ -329,11 +331,22 @@ export default function Leads() {
             <Upload className="h-4 w-4" />
             {syncing ? "Saving…" : "Save to GHL"}
           </button>
+          <button
+            type="button"
+            onClick={() => setShowSendMessage(true)}
+            disabled={loading || leads.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg border border-plum/20 px-4 py-2 text-sm font-medium text-plum transition-colors hover:bg-plum/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <MessageSquare className="h-4 w-4" />
+            Send Message
+          </button>
           <button className="btn-primary" onClick={() => setShowForm((s) => !s)}>
             {showForm ? "Cancel" : "Add Lead"}
           </button>
         </div>
       </div>
+
+      {showSendMessage && <SendMessageModal leads={leads} onClose={() => setShowSendMessage(false)} />}
 
       {syncMessage && <p className="mt-3 text-right text-sm text-plum/70">{syncMessage}</p>}
       {exportError && <p role="alert" className="mt-3 text-right text-sm text-red-600">{exportError}</p>}
