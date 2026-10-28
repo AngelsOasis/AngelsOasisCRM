@@ -18,16 +18,39 @@ declare const process: {
 // the whole conversation each turn and gets back a subject + body. Nothing is
 // saved or sent here; the user picks a draft and saves it from the page.
 // Gemini keys are Vercel secrets GEMINI_API_KEY_1..3 (GEMINI_API_KEY1..3 or
-// GEMINI_API_KEY also work). Models are tried in order: an overloaded (503)
-// or retired (404) model moves on to the next model, a rate-limited (429) or
-// rejected key moves on to the next key. GEMINI_MODELS (comma-separated)
-// overrides the model list.
+// GEMINI_API_KEY also work). Every Flash model has its own free quota per
+// key, so the composer walks the Flash family newest first, then the lite
+// models: an overloaded (503), slow, retired (404) or rejected (400) model
+// moves on to the next model, and a rate-limited (429) or rejected key moves
+// on to the next key. Failures are remembered for a while (per warm server
+// instance) so later requests skip straight to something that works.
+// GEMINI_MODELS (comma-separated) overrides the model list.
 export const config = { maxDuration: 60 };
 
-const MODELS = (process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite")
+const DEFAULT_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-flash-latest",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-flash-lite-latest",
+  "gemini-3.1-flash-lite-preview",
+];
+const MODELS = (process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || DEFAULT_MODELS.join(","))
   .split(",").map((model) => model.trim()).filter(Boolean);
-const REQUEST_TIMEOUT_MS = 20_000;
+const REQUEST_TIMEOUT_MS = 15_000;
 const TOTAL_BUDGET_MS = 55_000;
+const BUSY_COOLDOWN_MS = 2 * 60_000;
+const LIMIT_COOLDOWN_MS = 60_000;
+const RETIRED_COOLDOWN_MS = 6 * 60 * 60_000;
+const HEDGE_AFTER_MS = 8_000;
+const MAX_IN_FLIGHT = 3;
+
+// "model" or "model|key#" -> time until which it's skipped.
+const coolingDown = new Map<string, number>();
 const MAX_TURNS = 20;
 const MAX_TURN_CHARS = 8_000;
 
@@ -161,7 +184,13 @@ function formatBody(email: Record<string, unknown>): string {
 // next model, "stop" means retrying won't help.
 type GeminiResult =
   | { subject: string; body: string }
-  | { next: "key" | "model" | "stop"; status: number; error: string };
+  | { next: "key" | "model"; status: number; error: string; retryMs?: number };
+
+// Google's 429 says how long to wait, e.g. "retryDelay": "37s".
+function retryDelayMs(responseText: string): number | undefined {
+  const seconds = Number(responseText.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/)?.[1]);
+  return seconds > 0 ? Math.min(seconds * 1000, 10 * 60_000) : undefined;
+}
 
 function googleMessage(responseText: string): string {
   try {
@@ -173,7 +202,14 @@ function googleMessage(responseText: string): string {
   return responseText.slice(0, 300);
 }
 
-async function callGemini(model: string, apiKey: string, system: string, turns: Turn[], timeoutMs: number): Promise<GeminiResult> {
+async function callGemini(
+  model: string,
+  apiKey: string,
+  system: string,
+  turns: Turn[],
+  timeoutMs: number,
+  cancel: AbortSignal
+): Promise<GeminiResult> {
   let response: Response;
   try {
     response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -210,7 +246,7 @@ async function callGemini(model: string, apiKey: string, system: string, turns: 
           },
         },
       }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), cancel]),
     });
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
@@ -221,11 +257,8 @@ async function callGemini(model: string, apiKey: string, system: string, turns: 
   if (!response.ok) {
     const message = googleMessage(responseText);
     const badKey = /api key/i.test(message);
-    const next =
-      response.status === 429 || response.status === 403 || badKey ? "key"
-      : response.status === 404 || response.status >= 500 ? "model"
-      : "stop";
-    return { next, status: response.status, error: `${model}: ${message}` };
+    const next = response.status === 429 || response.status === 401 || response.status === 403 || badKey ? "key" : "model";
+    return { next, status: response.status, error: `${model}: ${message}`, retryMs: retryDelayMs(responseText) };
   }
   try {
     const text = JSON.parse(responseText).candidates?.[0]?.content?.parts?.[0]?.text ?? "";
@@ -283,20 +316,69 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   const system = `${genrePrompt} ${FACILITY_CONTEXT}`;
   const deadline = Date.now() + TOTAL_BUDGET_MS;
   const failures: Array<{ status: number; error: string }> = [];
-  attempts: for (const model of MODELS) {
-    for (const [index, key] of keys.entries()) {
+  // Every model/key pair, skipping ones that failed recently. If all of them
+  // are cooling down, try them all anyway rather than fail without asking.
+  const pairs = MODELS.flatMap((model) => keys.map((key, index) => ({ model, key, index })));
+  const now = Date.now();
+  const ready = pairs.filter(({ model, index }) =>
+    (coolingDown.get(model) ?? 0) <= now && (coolingDown.get(`${model}|${index}`) ?? 0) <= now);
+  const queue = ready.length ? ready : pairs;
+  const skippedModels = new Set<string>();
+  const runningModels = new Set<string>();
+  const cancelLosers = new AbortController();
+  type Draft = { subject: string; body: string; model: string; keyIndex: number };
+
+  // Hedged requests: a failure starts the next model/key right away, and a
+  // request still running after HEDGE_AFTER_MS also starts a different model
+  // alongside it (up to MAX_IN_FLIGHT). The first draft back wins; the rest
+  // are cancelled.
+  const winner = await new Promise<Draft | null>((resolve) => {
+    let inFlight = 0;
+    let done = false;
+    let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (draft: Draft | null) => {
+      done = true;
+      clearTimeout(hedgeTimer);
+      cancelLosers.abort();
+      resolve(draft);
+    };
+    const launch = () => {
+      if (done) return;
       const remaining = deadline - Date.now();
-      if (remaining < 3_000) break attempts;
-      const result = await callGemini(model, key, system, turns, Math.min(REQUEST_TIMEOUT_MS, remaining));
-      if ("body" in result) {
-        response.json({ ...result, model, keyIndex: index + 1 });
+      const at = queue.findIndex((pair) => !skippedModels.has(pair.model) && !runningModels.has(pair.model));
+      if (at < 0 || remaining < 3_000) {
+        if (inFlight === 0) finish(null);
         return;
       }
-      failures.push(result);
-      console.error(`ai-compose: ${model} with key ${index + 1} failed (${result.status}): ${result.error}`);
-      if (result.next === "stop") break attempts;
-      if (result.next === "model") continue attempts;
-    }
+      const { model, key, index } = queue.splice(at, 1)[0];
+      inFlight++;
+      runningModels.add(model);
+      clearTimeout(hedgeTimer);
+      hedgeTimer = setTimeout(() => inFlight < MAX_IN_FLIGHT && launch(), HEDGE_AFTER_MS);
+      callGemini(model, key, system, turns, Math.min(REQUEST_TIMEOUT_MS, remaining), cancelLosers.signal).then((result) => {
+        inFlight--;
+        runningModels.delete(model);
+        if (done) return;
+        if ("body" in result) {
+          finish({ ...result, model, keyIndex: index + 1 });
+          return;
+        }
+        failures.push(result);
+        console.error(`ai-compose: ${model} with key ${index + 1} failed (${result.status}): ${result.error}`);
+        if (result.next === "model") {
+          skippedModels.add(model);
+          coolingDown.set(model, Date.now() + (result.status === 404 ? RETIRED_COOLDOWN_MS : BUSY_COOLDOWN_MS));
+        } else {
+          coolingDown.set(`${model}|${index}`, Date.now() + (result.retryMs ?? LIMIT_COOLDOWN_MS));
+        }
+        launch();
+      });
+    };
+    launch();
+  });
+  if (winner) {
+    response.json(winner);
+    return;
   }
 
   const last = failures[failures.length - 1];
