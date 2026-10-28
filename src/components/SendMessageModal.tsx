@@ -74,7 +74,7 @@ export default function SendMessageModal({ leads, onClose }: Props) {
     setResult(null);
     try {
       const { data } = await supabase.auth.getSession();
-      const response = await fetch("/api/ghl-sync", {
+      const response = await fetch("/api/ghl-send-message", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

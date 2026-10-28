@@ -153,9 +153,24 @@ function SendingSettings({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-// The GoHighLevel Inbound Webhook URL used by the Leads page's "Save to GHL"
-// button. Stored in the ghl_settings table (any signed-in user); api/ghl-sync.ts reads it.
-function GhlSettings() {
+// Reusable inline webhook URL editor used by GhlSettings for each GHL webhook slot.
+function WebhookField({
+  label,
+  hint,
+  dialogTitle,
+  dialogHint,
+  column,
+  testEndpoint,
+  testSuccessText,
+}: {
+  label: string;
+  hint: string;
+  dialogTitle: string;
+  dialogHint: string;
+  column: "inbound_webhook_url" | "send_message_webhook_url";
+  testEndpoint?: string;
+  testSuccessText?: string;
+}) {
   const [url, setUrl] = useState("");
   const [draftUrl, setDraftUrl] = useState("");
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -164,59 +179,45 @@ function GhlSettings() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [message, setMessage] = useState<{ text: string; isError?: boolean } | null>(null);
 
+  const dialogId = `ghl-webhook-dialog-${column}`;
+
   useEffect(() => {
     (async () => {
       const { data: auth, error: authError } = await supabase.auth.getUser();
-      if (authError) {
-        setLoadError(authError.message);
+      if (authError || !auth.user) {
+        setLoadError(authError?.message ?? "Sign in to view GHL settings.");
         return;
       }
-      if (!auth.user) {
-        setLoadError("Sign in to view GHL settings.");
-        return;
-      }
-
-      const { data, error } = await supabase.from("ghl_settings").select("inbound_webhook_url").maybeSingle();
+      const { data, error } = await supabase.from("ghl_settings").select(column).maybeSingle();
       if (error) setLoadError(error.message);
       else {
-        setUrl(data?.inbound_webhook_url ?? "");
-        setConfigured(Boolean(data?.inbound_webhook_url));
+        const saved = (data as Record<string, string | null> | null)?.[column] ?? "";
+        setUrl(saved);
+        setConfigured(Boolean(saved));
       }
     })();
-  }, []);
+  }, [column]);
 
   useEffect(() => {
     if (!isEditOpen) return;
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && busy === null) setIsEditOpen(false);
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape" && busy === null) setIsEditOpen(false); }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [isEditOpen, busy]);
 
-  function openEditor() {
-    setDraftUrl(url);
-    setMessage(null);
-    setIsEditOpen(true);
-  }
+  function openEditor() { setDraftUrl(url); setMessage(null); setIsEditOpen(true); }
 
   async function save(e: FormEvent) {
     e.preventDefault();
     const newUrl = draftUrl.trim();
     let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(newUrl);
-    } catch {
-      setMessage({ text: "Enter a valid HTTPS webhook URL.", isError: true });
-      return;
+    try { parsedUrl = new URL(newUrl); } catch {
+      setMessage({ text: "Enter a valid HTTPS webhook URL.", isError: true }); return;
     }
     if (parsedUrl.protocol !== "https:") {
-      setMessage({ text: "The webhook URL must use HTTPS.", isError: true });
-      return;
+      setMessage({ text: "The webhook URL must use HTTPS.", isError: true }); return;
     }
-
-    setBusy("save");
-    setMessage(null);
+    setBusy("save"); setMessage(null);
     const { data: auth, error: authError } = await supabase.auth.getUser();
     if (authError || !auth.user) {
       setBusy(null);
@@ -225,24 +226,19 @@ function GhlSettings() {
     }
     const { error } = await supabase
       .from("ghl_settings")
-      .upsert({ id: true, inbound_webhook_url: newUrl, updated_by: auth.user.id });
+      .upsert({ id: true, [column]: newUrl, updated_by: auth.user.id });
     setBusy(null);
-    if (error) {
-      setMessage({ text: error.message, isError: true });
-      return;
-    }
-    setUrl(newUrl);
-    setConfigured(true);
-    setIsEditOpen(false);
-    setMessage({ text: "GHL webhook link saved." });
+    if (error) { setMessage({ text: error.message, isError: true }); return; }
+    setUrl(newUrl); setConfigured(true); setIsEditOpen(false);
+    setMessage({ text: "Webhook saved." });
   }
 
   async function sendTest() {
-    setBusy("test");
-    setMessage(null);
+    if (!testEndpoint) return;
+    setBusy("test"); setMessage(null);
     try {
       const { data } = await supabase.auth.getSession();
-      const response = await fetch("/api/ghl-sync", {
+      const response = await fetch(testEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${data.session?.access_token ?? ""}` },
         body: JSON.stringify({ test: true }),
@@ -250,37 +246,28 @@ function GhlSettings() {
       const result = (await response.json().catch(() => ({}))) as { sent?: number; failed?: Array<{ error: string }>; error?: string };
       if (result.error) setMessage({ text: result.error, isError: true });
       else if (result.failed?.length) setMessage({ text: `GHL rejected the test: ${result.failed[0].error}`, isError: true });
-      else setMessage({ text: "Test lead sent. In GHL, open the Inbound Webhook trigger and click Fetch Sample Requests." });
+      else setMessage({ text: testSuccessText ?? "Test sent." });
     } catch {
       setMessage({ text: "Couldn't reach the server to send the test.", isError: true });
     }
     setBusy(null);
   }
 
-  if (loadError) {
-    return (
-      <p className="mt-2 text-sm text-red-600">
-        Couldn't load GHL settings ({loadError}). Run <code>supabase/migrations/0007_ghl_settings.sql</code> and{" "}
-        <code>0008_ghl_settings_open_access.sql</code> in the Supabase SQL editor.
-      </p>
-    );
-  }
-  if (configured === null) return <p className="mt-2 text-sm text-plum/50">Loading…</p>;
+  if (loadError) return <p className="mt-2 text-sm text-red-600">{loadError}</p>;
+  if (configured === null) return <p className="mt-2 text-xs text-plum/50">Loading…</p>;
 
   return (
-    <div className="mt-3 space-y-3">
-      <p className="text-xs">
+    <div className="mt-4 rounded-lg border border-plum/10 p-4">
+      <p className="text-sm font-semibold text-plum-dark">{label}</p>
+      <p className="mt-0.5 text-xs text-plum/60">{hint}</p>
+      <p className="mt-2 text-xs">
         Status: {configured ? <span className="font-medium text-plum">Connected</span> : <span className="text-plum/50">not set</span>}
       </p>
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="btn-secondary !px-4 !py-2 text-sm"
-            onClick={openEditor}
-          >
-            {configured ? "Edit" : "Add webhook"}
-          </button>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-secondary !px-4 !py-2 text-sm" onClick={openEditor}>
+          {configured ? "Edit" : "Add webhook"}
+        </button>
+        {testEndpoint && (
           <button
             type="button"
             disabled={busy !== null || !configured}
@@ -289,63 +276,71 @@ function GhlSettings() {
           >
             {busy === "test" ? "Sending…" : "Send test lead"}
           </button>
-        </div>
-        {isEditOpen && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget && busy === null) setIsEditOpen(false);
-            }}
-          >
-            <section
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="ghl-webhook-dialog-title"
-              className="w-full max-w-lg rounded-[10px] border border-hairline bg-white p-6 shadow-xl sm:p-8"
-            >
-              <h3 id="ghl-webhook-dialog-title" className="font-serif text-xl text-plum-dark">
-                Edit GHL Webhook Link
-              </h3>
-              <p className="mt-2 text-sm text-plum/60">
-                Paste the Inbound Webhook URL from the GHL workflow you want to use.
-              </p>
-              <form onSubmit={save} className="mt-5 space-y-4">
-                <label className="block text-sm">
-                  <span className="font-medium text-plum-dark">GHL Webhook Link</span>
-                  <input
-                    type="url"
-                    required
-                    autoComplete="url"
-                    inputMode="url"
-                    placeholder="https://services.leadconnectorhq.com/hooks/…"
-                    className="mt-1 w-full px-3 py-2 font-mono text-xs"
-                    value={draftUrl}
-                    onChange={(event) => setDraftUrl(event.target.value)}
-                  />
-                  <span className="mt-1 block text-xs text-plum/50">
-                    The link must use HTTPS.
-                  </span>
-                </label>
-                {message?.isError && <p role="alert" className="text-sm text-red-600">{message.text}</p>}
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    className="rounded-full border border-plum/20 px-4 py-2 text-sm font-medium text-plum hover:bg-plum/5 disabled:opacity-50"
-                    disabled={busy !== null}
-                    onClick={() => setIsEditOpen(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn-primary !px-5 !py-2 text-sm" disabled={busy !== null}>
-                    {busy === "save" ? "Saving…" : "Save changes"}
-                  </button>
-                </div>
-              </form>
-            </section>
-          </div>
         )}
       </div>
-      {message && <p className={`text-xs ${message.isError ? "text-red-600" : "text-plum"}`}>{message.text}</p>}
+      {message && <p className={`mt-2 text-xs ${message.isError ? "text-red-600" : "text-plum"}`}>{message.text}</p>}
+      {isEditOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4"
+          onMouseDown={(e) => { if (e.target === e.currentTarget && busy === null) setIsEditOpen(false); }}
+        >
+          <section
+            role="dialog" aria-modal="true" aria-labelledby={dialogId}
+            className="w-full max-w-lg rounded-[10px] border border-hairline bg-white p-6 shadow-xl sm:p-8"
+          >
+            <h3 id={dialogId} className="font-serif text-xl text-plum-dark">{dialogTitle}</h3>
+            <p className="mt-2 text-sm text-plum/60">{dialogHint}</p>
+            <form onSubmit={save} className="mt-5 space-y-4">
+              <label className="block text-sm">
+                <span className="font-medium text-plum-dark">GHL Webhook Link</span>
+                <input
+                  type="url" required autoComplete="url" inputMode="url"
+                  placeholder="https://services.leadconnectorhq.com/hooks/…"
+                  className="mt-1 w-full px-3 py-2 font-mono text-xs"
+                  value={draftUrl} onChange={(e) => setDraftUrl(e.target.value)}
+                />
+                <span className="mt-1 block text-xs text-plum/50">The link must use HTTPS.</span>
+              </label>
+              {message?.isError && <p role="alert" className="text-sm text-red-600">{message.text}</p>}
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  className="rounded-full border border-plum/20 px-4 py-2 text-sm font-medium text-plum hover:bg-plum/5 disabled:opacity-50"
+                  disabled={busy !== null} onClick={() => setIsEditOpen(false)}
+                >Cancel</button>
+                <button type="submit" className="btn-primary !px-5 !py-2 text-sm" disabled={busy !== null}>
+                  {busy === "save" ? "Saving…" : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GhlSettings() {
+  return (
+    <div className="mt-3 space-y-1">
+      <WebhookField
+        label="Save to GHL webhook"
+        hint='Used by the "Save to GHL" button on the Leads page — creates or updates contacts in GHL.'
+        dialogTitle="Edit Save-to-GHL Webhook"
+        dialogHint="Paste the Inbound Webhook URL from your GHL contact-creation workflow."
+        column="inbound_webhook_url"
+        testEndpoint="/api/ghl-sync"
+        testSuccessText="Test lead sent. In GHL, open the Inbound Webhook trigger and click Fetch Sample Requests."
+      />
+      <WebhookField
+        label="Send Message webhook"
+        hint='Used by the "Send Message" button on the Leads page — fires your GHL email-to-leads workflow.'
+        dialogTitle="Edit Send Message Webhook"
+        dialogHint="Paste the Inbound Webhook URL from your GHL send-message workflow."
+        column="send_message_webhook_url"
+        testEndpoint="/api/ghl-send-message"
+        testSuccessText="Test lead sent to the Send Message webhook."
+      />
     </div>
   );
 }
@@ -398,8 +393,8 @@ export default function Settings() {
         <div className="card">
           <h2 className="font-serif text-lg">GoHighLevel</h2>
           <p className="mt-2 text-sm text-plum/60">
-            Where the Leads page's <strong>Save to GHL</strong> button sends leads. Each lead is posted to a GHL
-            workflow's Inbound Webhook, which creates or updates the contact.
+            Connect two GHL workflows: one for saving leads as contacts, one for sending messages to leads.
+            Each uses its own Inbound Webhook URL.
           </p>
           <GhlSettings />
         </div>
