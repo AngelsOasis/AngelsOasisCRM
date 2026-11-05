@@ -102,6 +102,28 @@ export interface FacilityBedAvailability {
   updated_at: string;
 }
 
+export type BedStatus = "available" | "occupied" | "unavailable";
+
+export interface FacilityRoom {
+  id: string;
+  facility_id: string;
+  room_code: string;
+  room_name: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface FacilityBed {
+  id: string;
+  room_id: string;
+  bed_number: number;
+  status: BedStatus;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
 export type ApprovalStatus = "pending_approval" | "approved" | "rejected" | "needs_edit";
 export type SendStatus = "draft" | "scheduled" | "sent" | "delivered" | "opened" | "clicked" | "replied" | "failed";
 export type CampaignSendStatus = "draft" | "scheduled" | "sending" | "sent" | "failed";
